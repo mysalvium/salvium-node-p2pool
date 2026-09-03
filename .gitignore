@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+.portainer-token
 compose.override.yml
 compose.override.yaml
 
