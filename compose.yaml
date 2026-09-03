@@ -1,0 +1,288 @@
+name: salvium
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  perms:
+    image: ${ALPINE_IMAGE:-alpine:3.20}
+    container_name: salvium-perms
+    user: "0:0"
+    restart: "no"
+    logging: *default-logging
+    command:
+      - sh
+      - -c
+      - |
+        set -eux
+        for d in /mnt/salviumd /mnt/salviumd-bin /mnt/p2pool /mnt/p2pool-stats /mnt/p2pool-control; do
+          mkdir -p "$$d"
+          chown -R ${PUID:-1000}:${PGID:-1000} "$$d"
+        done
+        mkdir -p /mnt/p2pool/public /mnt/p2pool/private
+        chown -R ${PUID:-1000}:${PGID:-1000} /mnt/p2pool/public /mnt/p2pool/private
+        chown -R ${PUID:-1000}:${PGID:-1000} /mnt/ops
+        chmod -R a+rX /mnt/ops
+        echo "Permissions fixed."
+    volumes:
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/salviumd:/mnt/salviumd"
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/salviumd-bin:/mnt/salviumd-bin"
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool:/mnt/p2pool"
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool-stats:/mnt/p2pool-stats"
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool-control:/mnt/p2pool-control"
+      - "${SALVIUM_APP_ROOT:?Set SALVIUM_APP_ROOT in .env}/ops:/mnt/ops"
+
+  salviumd:
+    build:
+      context: ./docker/salviumd
+    image: ${SALVIUMD_IMAGE:-salviumd:local}
+    container_name: salviumd
+    user: "${PUID:-1000}:${PGID:-1000}"
+    restart: unless-stopped
+    stop_grace_period: 2m
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    cpus: "${SALVIUMD_CPUS:-2.0}"
+    mem_limit: ${SALVIUMD_MEMORY_LIMIT:-4192M}
+    ulimits:
+      nofile:
+        soft: 1048576
+        hard: 1048576
+    logging: *default-logging
+    depends_on:
+      perms:
+        condition: service_completed_successfully
+    command:
+      - --confirm-external-bind
+      - --p2p-bind-ip=0.0.0.0
+      - --p2p-bind-port=19080
+      - --rpc-bind-ip=0.0.0.0
+      - --rpc-bind-port=19081
+      - --rpc-restricted-bind-ip=0.0.0.0
+      - --rpc-restricted-bind-port=19089
+      - --p2p-use-ipv6
+      - --rpc-use-ipv6
+      - "--rpc-restricted-bind-ipv6-address=::"
+      - --zmq-pub=tcp://0.0.0.0:19083
+      - --out-peers=32
+      - --in-peers=64
+      - --enforce-dns-checkpointing
+      - --enable-dns-blocklist
+      - --no-igd
+      - --prune-blockchain
+      - --sync-pruned-blocks
+      - --add-exclusive-node=seed01.salvium.io
+      - --add-exclusive-node=seed02.salvium.io
+      - --add-exclusive-node=seed03.salvium.io
+      - --add-exclusive-node=seed01.whiskymine.io
+      - --add-exclusive-node=seed02.whiskymine.io
+    ports:
+      - "${SALVIUM_P2P_PORT:-19080}:19080"
+      - "${SALVIUM_RPC_PORT:-19081}:19081"
+      - "${SALVIUM_RESTRICTED_RPC_PORT:-19089}:19089"
+    volumes:
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/salviumd:/home/salvium/.salvium"
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/salviumd-bin:/home/salvium/bin"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:19089/get_info"]
+      interval: 30s
+      timeout: 5s
+      retries: 20
+      start_period: 1m
+
+  p2pool:
+    build:
+      context: ./docker/p2pool
+    image: ${P2POOL_IMAGE:-p2pool-salvium:local}
+    container_name: salvium-p2pool
+    user: "${PUID:-1000}:${PGID:-1000}"
+    restart: unless-stopped
+    stop_grace_period: 1m
+    cpus: "${P2POOL_CPUS:-2.0}"
+    mem_limit: ${P2POOL_MEMORY_LIMIT:-4192M}
+    cap_add:
+      - IPC_LOCK
+      - SYS_ADMIN
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    logging: *default-logging
+    depends_on:
+      perms:
+        condition: service_completed_successfully
+      salviumd:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'mkdir -p /tmp/ops && tr -d "\r" < /ops/switch-entrypoint.sh > /tmp/ops/switch-entrypoint.sh && exec /bin/bash /tmp/ops/switch-entrypoint.sh "$$@"'
+      - p2pool-entry
+    command:
+      - --host
+      - salviumd
+      - --rpc-port
+      - "19089"
+      - --zmq-port
+      - "19083"
+      - --log-file
+      - /dev/stdout
+      - --wallet
+      - "${P2POOL_WALLET:?Set P2POOL_WALLET in .env}"
+      - --stratum
+      - 0.0.0.0:3333
+      - --data-api
+      - /home/p2pool/stats
+      - --stratum-api
+      - --no-igd
+    ports:
+      - "${P2POOL_STRATUM_PORT:-3333}:3333"
+      - "${P2POOL_PRIVATE_P2P_PORT:-38888}:38888"
+      - "${P2POOL_PUBLIC_P2P_PORT:-38889}:38889"
+    volumes:
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool:/home/p2pool/.p2pool"
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool-stats:/home/p2pool/stats"
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool-control:/control:ro"
+      - "${SALVIUM_APP_ROOT:?Set SALVIUM_APP_ROOT in .env}/ops:/ops:ro"
+      - /dev/hugepages:/dev/hugepages
+
+  salviumd-updater:
+    image: ${DOCKER_CLI_IMAGE:-docker:cli}
+    container_name: salviumd-updater
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      salviumd:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      CHECK_INTERVAL: "${UPDATE_CHECK_INTERVAL:-21600}"
+      RELEASES_API: https://api.github.com/repos/salvium/salvium/releases/latest
+      STOP_TIMEOUT: "120"
+      TARGET_CONTAINER: salviumd
+      VERSION_FILE: /binmeta/.current_version
+    command:
+      - |
+        apk add --no-cache curl jq >/dev/null 2>&1 || true
+        echo "[updater] started; checking every $${CHECK_INTERVAL}s"
+        while true; do
+          LATEST=$$(curl -sf --max-time 20 "$${RELEASES_API}" | jq -r '.tag_name // empty' 2>/dev/null || true)
+          CURRENT=$$(cat "$${VERSION_FILE}" 2>/dev/null || true)
+          if [ -n "$${LATEST}" ] && [ -f "$${VERSION_FILE}" ] && [ "$${LATEST}" != "$${CURRENT}" ]; then
+            echo "[updater] new version $${LATEST} (installed $${CURRENT:-none}) - restarting $${TARGET_CONTAINER}"
+            docker restart -t "$${STOP_TIMEOUT}" "$${TARGET_CONTAINER}" || echo "[updater] restart failed"
+          else
+            echo "[updater] no update (installed $${CURRENT:-unknown}, latest $${LATEST:-unreachable})"
+          fi
+          sleep "$${CHECK_INTERVAL}"
+        done
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/salviumd-bin:/binmeta:ro"
+
+  p2pool-updater:
+    image: ${DOCKER_CLI_IMAGE:-docker:cli}
+    container_name: p2pool-updater
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      p2pool:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      CHECK_INTERVAL: "${UPDATE_CHECK_INTERVAL:-21600}"
+      RELEASES_API: https://gitlab.com/api/v4/projects/whiskyrelaxing-group%2Fp2pool-salvium-releases/releases
+      STOP_TIMEOUT: "60"
+      TARGET_CONTAINER: salvium-p2pool
+      VERSION_FILE: /binmeta/bin/.current_version
+    command:
+      - |
+        apk add --no-cache curl jq >/dev/null 2>&1 || true
+        echo "[p2pool-updater] started; checking every $${CHECK_INTERVAL}s"
+        while true; do
+          LATEST=$$(curl -sf --max-time 20 "$${RELEASES_API}" | jq -r '.[0].tag_name // empty' 2>/dev/null || true)
+          CURRENT=$$(cat "$${VERSION_FILE}" 2>/dev/null || true)
+          if [ -n "$${LATEST}" ] && [ -f "$${VERSION_FILE}" ] && [ "$${LATEST}" != "$${CURRENT}" ]; then
+            echo "[p2pool-updater] new version $${LATEST} (installed $${CURRENT:-none}) - restarting $${TARGET_CONTAINER}"
+            docker restart -t "$${STOP_TIMEOUT}" "$${TARGET_CONTAINER}" || echo "[p2pool-updater] restart failed"
+          else
+            echo "[p2pool-updater] no update (installed $${CURRENT:-unknown}, latest $${LATEST:-unreachable})"
+          fi
+          sleep "$${CHECK_INTERVAL}"
+        done
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool:/binmeta:ro"
+
+  p2pool-watchdog:
+    image: ${DOCKER_CLI_IMAGE:-docker:cli}
+    container_name: p2pool-watchdog
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      p2pool:
+        condition: service_started
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'mkdir -p /tmp/ops && tr -d "\r" < /ops/p2pool-watchdog.sh > /tmp/ops/p2pool-watchdog.sh && exec /bin/sh /tmp/ops/p2pool-watchdog.sh'
+      - p2pool-watchdog
+    environment:
+      CHECK_INTERVAL: "${WATCHDOG_CHECK_INTERVAL:-60}"
+      FAIL_AFTER: "${WATCHDOG_FAIL_AFTER:-900}"
+      RECOVER_AFTER: "${WATCHDOG_RECOVER_AFTER:-1800}"
+      DWELL: "${WATCHDOG_DWELL:-3600}"
+      TRIAL_WINDOW: "${WATCHDOG_TRIAL_WINDOW:-300}"
+      HEIGHT_STALL: "${WATCHDOG_HEIGHT_STALL:-600}"
+      STALE_STATS: "${WATCHDOG_STALE_STATS:-300}"
+      PROBE_MIN_OK: "${WATCHDOG_PROBE_MIN_OK:-2}"
+      STOP_TIMEOUT: "60"
+      TARGET_CONTAINER: salvium-p2pool
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool-control:/control"
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool-stats:/stats:ro"
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool/public:/peers-live:ro"
+      - "${SALVIUM_APP_ROOT:?Set SALVIUM_APP_ROOT in .env}/ops:/ops:ro"
+
+  stats:
+    build:
+      context: ./docker/stats
+    image: ${STATS_IMAGE:-salvium-stats:local}
+    container_name: salvium-stats
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    logging: *default-logging
+    depends_on:
+      p2pool:
+        condition: service_started
+    command:
+      - /bin/sh
+      - -c
+      - >-
+        cd /tmp/p2pool-repo;
+        git pull;
+        cp -r /tmp/p2pool-repo/docker-compose/statistics/app/* /app/;
+        echo 'Starting P2Pool Statistics App...';
+        python /app/p2pool_statistics.py || echo 'App crashed! Staying alive for troubleshooting...';
+        tail -f /dev/null
+    ports:
+      - "${STATS_PORT:-3000}:80"
+    volumes:
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool-stats:/data:ro"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:80 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 1m

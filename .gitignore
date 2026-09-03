@@ -1,0 +1,50 @@
+# Local deployment configuration
+.env
+.env.*
+!.env.example
+compose.override.yml
+compose.override.yaml
+
+# Runtime and sensitive data
+data/
+audit/
+staker/
+wallet/
+wallets/
+secrets/
+**/secrets/
+**/wallets/
+
+# Wallets, databases, chain state, caches, and logs
+*.key
+*.keys
+*.mdb
+*.bin
+*.cache
+*.blocks
+*.dat
+*.log
+*.log.*
+.current_version
+
+# Generated archives and backups
+*.zip
+*.tar
+*.tar.gz
+*.tar.zst
+*.sha256
+*.bak
+*.bak-*
+*.partial
+
+# Local tools and editor state
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/

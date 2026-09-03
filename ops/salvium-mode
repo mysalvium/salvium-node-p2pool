@@ -1,0 +1,85 @@
+#!/bin/bash
+# =============================================================================
+# salvium-mode -- control which sidechain p2pool mines on.
+#
+#   salvium-mode                 show current status
+#   salvium-mode auto            hand control to the watchdog
+#   salvium-mode public          pin PUBLIC  (watchdog will not move it)
+#   salvium-mode private         pin PRIVATE (watchdog will not move it)
+#   salvium-mode history         show every mode change on record
+#
+# Pinning takes effect immediately (restarts p2pool). Switching to `auto` does
+# not restart anything -- the watchdog takes over from the current mode.
+#
+# Set SALVIUM_APP_ROOT when the repository is installed elsewhere.
+# =============================================================================
+set -euo pipefail
+
+BASE="${SALVIUM_APP_ROOT:-/mnt/sharedrive/apps/salvium}"
+CONTROL="$BASE/data/p2pool-control"
+STATS="$BASE/data/p2pool-stats"
+TARGET=salvium-p2pool
+
+die() { echo "error: $*" >&2; exit 1; }
+
+[ -d "$CONTROL" ] || die "control dir $CONTROL not found -- has the dual-mode migration been run?"
+
+read_ctl() { [ -r "$CONTROL/$1" ] && tr -d '[:space:]' < "$CONTROL/$1" || echo "$2"; }
+
+show_status() {
+    local mode active
+    mode=$(read_ctl mode "?")
+    active=$(read_ctl active "?")
+
+    echo "desired mode : $mode"
+    echo "active mode  : $active"
+    echo "container    : $(docker inspect "$TARGET" --format '{{.State.Status}} (restarts={{.RestartCount}})' 2>/dev/null || echo 'not found')"
+
+    if [ -r "$STATS/local/p2p" ]; then
+        echo "p2p peers    : $(sed -n 's/.*[{,]"connections":\([0-9][0-9]*\).*/\1/p' "$STATS/local/p2p" | head -1)"
+    fi
+    if [ -r "$STATS/pool/stats" ]; then
+        echo "sidechain ht : $(sed -n 's/.*"sidechainHeight":\([0-9][0-9]*\).*/\1/p' "$STATS/pool/stats" | head -1)"
+    fi
+    if [ -r "$STATS/local/stratum" ]; then
+        echo "hashrate 15m : $(sed -n 's/.*"hashrate_15m":\([0-9][0-9]*\).*/\1/p' "$STATS/local/stratum" | head -1) H/s"
+        echo "shares       : $(sed -n 's/.*"shares_found":\([0-9][0-9]*\).*/\1/p' "$STATS/local/stratum" | head -1) found, $(sed -n 's/.*"shares_failed":\([0-9][0-9]*\).*/\1/p' "$STATS/local/stratum" | head -1) failed"
+    fi
+
+    if [ -r "$CONTROL/state.json" ]; then
+        echo
+        echo "--- watchdog state ---"
+        cat "$CONTROL/state.json"
+    fi
+}
+
+set_mode() {  # set_mode <mode> <pin?>
+    local want=$1 pin=$2 current
+    current=$(read_ctl active public)
+
+    printf '%s\n' "$want" > "$CONTROL/mode"
+
+    if [ "$pin" = pin ]; then
+        if [ "$current" = "$want" ]; then
+            echo "already running $want; pinned (watchdog will no longer switch)"
+            return
+        fi
+        printf '%s\n' "$want" > "$CONTROL/active"
+        printf '%s  %-7s  %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$want" "manual pin via salvium-mode" >> "$CONTROL/switch.log"
+        echo "switching $current -> $want and restarting $TARGET ..."
+        docker restart -t 60 "$TARGET" >/dev/null
+        echo "done. p2pool is restarting into $want mode."
+    else
+        echo "mode set to auto; watchdog now controls switching (currently on $current)."
+    fi
+}
+
+case "${1:-status}" in
+    status|"")  show_status ;;
+    auto)       set_mode auto nopin ;;
+    public)     set_mode public pin ;;
+    private)    set_mode private pin ;;
+    history)    [ -r "$CONTROL/switch.log" ] && cat "$CONTROL/switch.log" || echo "no switches recorded yet" ;;
+    -h|--help)  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' ;;
+    *)          die "unknown command '$1' (try: status, auto, public, private, history)" ;;
+esac
