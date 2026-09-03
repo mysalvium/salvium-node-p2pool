@@ -39,6 +39,7 @@ secrets/
 *.partial
 
 # Local tools and editor state
+.codex/
 .claude/
 .vscode/
 .idea/
