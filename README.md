@@ -17,8 +17,13 @@ The stack checks upstream releases every six hours by default:
 - `p2pool-updater` checks the P2Pool Salvium GitLab releases.
 - When a newer release is found, the updater restarts only the affected
   container.
-- During that restart, the container downloads the new binary and records its
-  version in the persistent data directory.
+- During that restart, the container downloads the new release and verifies
+  its SHA-256 checksum against the checksum published by the same upstream
+  release.
+- A missing or mismatched checksum rejects the update. If a working binary is
+  already installed, the stack keeps using it.
+- Verified binaries are installed with an atomic rename, and the replaced
+  binary is retained with a `.previous` suffix for rollback.
 - If the release service cannot be reached, the existing binary continues to
   be used.
 
@@ -474,8 +479,10 @@ docker compose --env-file .env logs --tail=100 salviumd
 - The default ports are published on the Docker host. Use firewall rules and
   do not expose RPC, statistics, or Stratum services directly to the internet
   unless you understand the consequences.
-- Release downloads and some image references are not yet fully pinned and
-  cryptographically verified. See `docs/security.md`.
+- Binary downloads are SHA-256 verified, but checksums come from the same
+  upstream release channel rather than an independent digital signature.
+  Some container-image and source references are not yet pinned. See
+  `docs/security.md`.
 
 ## What is intentionally not included?
 
