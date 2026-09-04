@@ -8,11 +8,25 @@ x-logging: &default-logging
 
 services:
   perms:
-    image: ${ALPINE_IMAGE:-alpine:3.20}
+    image: ${ALPINE_IMAGE:-alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b}
     container_name: salvium-perms
     user: "0:0"
     restart: "no"
     network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    cpus: "${PERMS_CPUS:-0.25}"
+    mem_limit: ${PERMS_MEMORY_LIMIT:-128M}
     logging: *default-logging
     command:
       - sh
@@ -57,6 +71,7 @@ services:
       - no-new-privileges:true
     cpus: "${SALVIUMD_CPUS:-2.0}"
     mem_limit: ${SALVIUMD_MEMORY_LIMIT:-4192M}
+    pids_limit: ${SALVIUMD_PIDS_LIMIT:-1024}
     ulimits:
       nofile:
         soft: 1048576
@@ -112,11 +127,19 @@ services:
     user: "${PUID:-1000}:${PGID:-1000}"
     restart: unless-stopped
     stop_grace_period: 1m
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m
+      - /run:rw,noexec,nosuid,nodev,size=16m
+    cap_drop:
+      - ALL
     cpus: "${P2POOL_CPUS:-2.0}"
     mem_limit: ${P2POOL_MEMORY_LIMIT:-4192M}
+    pids_limit: ${P2POOL_PIDS_LIMIT:-1024}
     cap_add:
       - IPC_LOCK
-      - SYS_ADMIN
+    security_opt:
+      - no-new-privileges:true
     ulimits:
       memlock:
         soft: -1
@@ -174,6 +197,9 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    pids_limit: 128
+    cpus: "${MANAGEMENT_CPUS:-0.25}"
+    mem_limit: ${MANAGEMENT_MEMORY_LIMIT:-128M}
     logging: *default-logging
     depends_on:
       salviumd:
@@ -220,6 +246,9 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    pids_limit: 128
+    cpus: "${MANAGEMENT_CPUS:-0.25}"
+    mem_limit: ${MANAGEMENT_MEMORY_LIMIT:-128M}
     logging: *default-logging
     depends_on:
       p2pool:
@@ -266,6 +295,9 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    pids_limit: 128
+    cpus: "${MANAGEMENT_CPUS:-0.25}"
+    mem_limit: ${MANAGEMENT_MEMORY_LIMIT:-128M}
     logging: *default-logging
     depends_on:
       p2pool:
@@ -307,22 +339,39 @@ services:
   stats:
     image: ${STATS_IMAGE:-salvium-stats:local}
     container_name: salvium-stats
+    user: "${PUID:-1000}:${PGID:-1000}"
     restart: unless-stopped
-    stdin_open: true
-    tty: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+      - /run:rw,noexec,nosuid,nodev,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: ${STATS_PIDS_LIMIT:-128}
+    cpus: "${STATS_CPUS:-0.50}"
+    mem_limit: ${STATS_MEMORY_LIMIT:-256M}
     logging: *default-logging
     depends_on:
       p2pool:
         condition: service_started
     command:
-      - python
-      - /app/p2pool_statistics.py
+      - gunicorn
+      - --bind=0.0.0.0:8080
+      - --workers=2
+      - --threads=2
+      - --timeout=30
+      - --access-logfile=-
+      - --error-logfile=-
+      - --no-control-socket
+      - p2pool_statistics:app
     ports:
-      - "${LAN_BIND_IP:-127.0.0.1}:${STATS_PORT:-3000}:80"
+      - "${LAN_BIND_IP:-127.0.0.1}:${STATS_PORT:-3000}:8080"
     volumes:
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool-stats:/data:ro"
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:80 || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8080 || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 10
@@ -346,6 +395,9 @@ services:
       - NET_ADMIN
     security_opt:
       - no-new-privileges:true
+    pids_limit: 64
+    cpus: "${FIREWALL_CPUS:-0.25}"
+    mem_limit: ${FIREWALL_MEMORY_LIMIT:-64M}
     logging: *default-logging
     environment:
       LAN_BIND_IP: "${LAN_BIND_IP:-192.168.1.54}"

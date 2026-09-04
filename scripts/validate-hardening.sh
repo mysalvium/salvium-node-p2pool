@@ -43,6 +43,25 @@ check "each management service has only its dedicated broker request directory" 
   '(.services["salviumd-updater"].volumes | any(.target == "/broker" and ((.read_only // false) == false))) and
    (.services["p2pool-updater"].volumes | any(.target == "/broker" and ((.read_only // false) == false))) and
    (.services["p2pool-watchdog"].volumes | any(.target == "/broker" and ((.read_only // false) == false)))'
+check "P2Pool is read-only without SYS_ADMIN" \
+  '.services.p2pool.read_only == true and
+   (.services.p2pool.cap_drop | index("ALL") != null) and
+   (.services.p2pool.cap_add | index("IPC_LOCK") != null) and
+   (.services.p2pool.cap_add | index("SYS_ADMIN") == null) and
+   ([.services.p2pool.security_opt[] | startswith("no-new-privileges")] | any)'
+check "statistics runs non-root and read-only without capabilities" \
+  '.services.stats.user != "0" and .services.stats.user != "0:0" and
+   .services.stats.read_only == true and
+   (.services.stats.cap_drop | index("ALL") != null) and
+   ([.services.stats.security_opt[] | startswith("no-new-privileges")] | any)'
+check "statistics uses the unprivileged internal HTTP port" \
+  '(.services.stats.ports | any(.target == 8080)) and
+   (.services.stats.healthcheck.test | join(" ") | contains("127.0.0.1:8080")) and
+   (.services.stats.command[0] == "gunicorn")'
+check "all long-running services have process limits" \
+  '[.services.salviumd, .services.p2pool, .services["salviumd-updater"],
+    .services["p2pool-updater"], .services["p2pool-watchdog"],
+    .services.stats, .services.firewall] | all(.pids_limit > 0)'
 check "watchdog receives broker status read-only" \
   '.services["p2pool-watchdog"].volumes | any(.target == "/docker-status" and .read_only == true)'
 check "root broker source is not mounted into any container" \

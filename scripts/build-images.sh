@@ -27,7 +27,9 @@ P2POOL_IMAGE="${P2POOL_IMAGE:-p2pool-salvium:local}"
 STATS_IMAGE="${STATS_IMAGE:-salvium-stats:local}"
 FIREWALL_IMAGE="${FIREWALL_IMAGE:-salvium-firewall:local}"
 MANAGEMENT_IMAGE="${MANAGEMENT_IMAGE:-salvium-management:local}"
-ALPINE_IMAGE="${ALPINE_IMAGE:-alpine:3.20}"
+UBUNTU_IMAGE="${UBUNTU_IMAGE:-ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc}"
+ALPINE_IMAGE="${ALPINE_IMAGE:-alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b}"
+PYTHON_IMAGE="${PYTHON_IMAGE:-python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534}"
 STATS_SOURCE_COMMIT="${STATS_SOURCE_COMMIT:-a0fed9e186fa85d16eefdaf62bd6dbecadb629af}"
 
 G='\033[0;32m'; Y='\033[1;33m'; NC='\033[0m'
@@ -42,19 +44,19 @@ echo ""
 
 # ── salviumd ────────────────────────────────────────────────────────────────
 info "Building ${SALVIUMD_IMAGE} ..."
-docker build -t "$SALVIUMD_IMAGE" "$BUILD_DIR/salviumd"
+docker build --build-arg "UBUNTU_IMAGE=$UBUNTU_IMAGE" -t "$SALVIUMD_IMAGE" "$BUILD_DIR/salviumd"
 
 # ── p2pool-salvium ──────────────────────────────────────────────────────────
 info "Building ${P2POOL_IMAGE} ..."
-docker build -t "$P2POOL_IMAGE" "$BUILD_DIR/p2pool"
+docker build --build-arg "UBUNTU_IMAGE=$UBUNTU_IMAGE" -t "$P2POOL_IMAGE" "$BUILD_DIR/p2pool"
 
 # ── salvium-stats ───────────────────────────────────────────────────────────
 info "Building ${STATS_IMAGE} ..."
-docker build --build-arg "STATS_SOURCE_COMMIT=$STATS_SOURCE_COMMIT" -t "$STATS_IMAGE" "$BUILD_DIR/stats"
+docker build --build-arg "PYTHON_IMAGE=$PYTHON_IMAGE" --build-arg "STATS_SOURCE_COMMIT=$STATS_SOURCE_COMMIT" -t "$STATS_IMAGE" "$BUILD_DIR/stats"
 
 # ── host ingress policy ─────────────────────────────────────────────────────
 info "Building ${FIREWALL_IMAGE} ..."
-docker build -t "$FIREWALL_IMAGE" "$BUILD_DIR/firewall"
+docker build --build-arg "ALPINE_IMAGE=$ALPINE_IMAGE" -t "$FIREWALL_IMAGE" "$BUILD_DIR/firewall"
 
 # ── socket-free updater/watchdog runtime ────────────────────────────────────
 info "Building ${MANAGEMENT_IMAGE} ..."

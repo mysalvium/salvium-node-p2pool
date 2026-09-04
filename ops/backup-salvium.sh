@@ -1,12 +1,21 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-readonly SOURCE_DATASET="${SOURCE_DATASET:-sharedrive/apps}"
-readonly SOURCE_NAME="${SOURCE_NAME:-salvium}"
-readonly SOURCE_MOUNT_ROOT="${SOURCE_MOUNT_ROOT:-/mnt/sharedrive/apps}"
-readonly BACKUP_DIR="${BACKUP_DIR:-/mnt/sharedrive/backups/salvium-node}"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+CONFIG_FILE=${OPERATIONS_CONFIG:-$SCRIPT_DIR/operations.conf}
+config_value() {
+  local key=$1 default=$2 value
+  value=$(sed -n "s/^${key}=//p" "$CONFIG_FILE" 2>/dev/null | tail -n 1)
+  printf '%s' "${value:-$default}"
+}
+
+readonly SOURCE_DATASET="${SOURCE_DATASET:-$(config_value SOURCE_DATASET sharedrive/apps)}"
+readonly SOURCE_NAME="${SOURCE_NAME:-$(config_value SOURCE_NAME salvium)}"
+readonly SOURCE_MOUNT_ROOT="${SOURCE_MOUNT_ROOT:-$(config_value SOURCE_MOUNT_ROOT /mnt/sharedrive/apps)}"
+readonly BACKUP_DIR="${BACKUP_DIR:-$(config_value BACKUP_DIR /mnt/sharedrive/backups/salvium-node)}"
 readonly RETENTION_COUNT="${RETENTION_COUNT:-8}"
 readonly SNAPSHOT_PREFIX="${SNAPSHOT_PREFIX:-salvium-weekly-}"
+readonly RPC_CONTAINER="${RPC_CONTAINER:-salviumd}"
 readonly RPC_URL="${RPC_URL:-http://127.0.0.1:19081/save_bc}"
 readonly RPC_PAYLOAD='{}'
 
@@ -51,7 +60,7 @@ if [[ "$(docker inspect -f '{{.State.Running}}' salviumd 2>/dev/null || true)" !
 fi
 
 # Ask the daemon to commit its blockchain state before the atomic ZFS snapshot.
-curl --fail --silent --show-error --max-time 120 \
+docker exec "${RPC_CONTAINER}" curl --fail --silent --show-error --max-time 120 \
   -H 'Content-Type: application/json' \
   --data "${RPC_PAYLOAD}" \
   "${RPC_URL}" > "${rpc_response}"
@@ -81,6 +90,7 @@ fi
   printf 'salviumd_image=%s\n' "$(docker inspect -f '{{.Config.Image}}' salviumd)"
   printf 'salviumd_version=%s\n' "$(docker exec salviumd salviumd --version 2>/dev/null | head -n 1)"
 } > "${metadata}"
+chmod 0600 "${metadata}"
 
 printf '%s Compressing snapshot into %s.\n' "$(date --iso-8601=seconds)" "${archive}"
 if command -v ionice >/dev/null 2>&1; then
@@ -91,6 +101,7 @@ fi
 
 mv -- "${partial}" "${archive}"
 sha256sum "${archive}" > "${archive}.sha256"
+chmod 0600 "${archive}" "${archive}.sha256"
 zstd --test --quiet "${archive}"
 tar -I zstd -tf "${archive}" >/dev/null
 printf '%s Archive integrity verified.\n' "$(date --iso-8601=seconds)"

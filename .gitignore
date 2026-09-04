@@ -50,3 +50,7 @@ Thumbs.db
 __pycache__/
 *.py[cod]
 .venv/
+
+# Generated security reports, scanner cache, and SBOMs
+.security-cache/
+.security-reports/

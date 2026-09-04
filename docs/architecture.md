@@ -33,10 +33,16 @@ The Compose file retains the production resource limits and hardening:
 
 - Salvium daemon: two CPUs, 4192 MiB, read-only root, capabilities dropped,
   `no-new-privileges`, and a two-minute stop grace period.
-- P2Pool: two CPUs, 4192 MiB, unlimited memlock, hugepages, `IPC_LOCK`, and
-  `SYS_ADMIN`.
+- P2Pool: non-root, two CPUs, 4192 MiB, read-only root, process limit,
+  unlimited memlock, hugepages, only `IPC_LOCK`, all other capabilities
+  dropped, and `no-new-privileges`. A disposable public/private test confirms
+  it starts and talks to `salviumd` without `SYS_ADMIN`.
+- Statistics: non-root Gunicorn on internal port `8080`, read-only P2Pool data,
+  read-only root, no capabilities, `no-new-privileges`, and CPU/memory/process
+  limits. Host port `3000` remains the browser-facing default.
 - Firewall: read-only root, only `NET_ADMIN`, host networking, no Docker socket,
   no host filesystem mount, and no listening service.
 - Updaters and watchdog: non-root, read-only root filesystems, all capabilities
   dropped, `no-new-privileges`, and no Docker socket.
+- Every long-running container has an explicit process-count limit.
 - JSON-file logs rotate at three 10 MiB files per service.

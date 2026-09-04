@@ -19,11 +19,22 @@ The checksum and archive currently come from the same release channel. This
 protects against corruption and mismatched downloads, but an independently
 verified digital signature would provide stronger publisher authentication.
 
-Before production use:
+Implemented supply-chain protections:
 
-- Pin remaining base images by digest.
-- Determine whether P2Pool can run without `SYS_ADMIN`.
-- Run a secret scanner before every release and before adding any Git remote.
+- All Ubuntu, Alpine, and Python base references are pinned to immutable
+  multi-platform manifest digests. Alpine uses a supported release branch.
+- The statistics application source is pinned to a reviewed full commit.
+- Python runtime dependencies are exact-version locked and every downloaded
+  wheel must match an expected SHA-256 hash.
+- The scanner release archive is pinned and checksum-verified before use. It
+  checks repository secrets, Compose/Dockerfile configuration, dependencies,
+  and all five images; it fails on fixable critical image vulnerabilities and
+  emits SPDX JSON SBOMs.
+- GitHub runs the checks on pushes, pull requests, weekly, and on demand.
+  Third-party Actions are pinned to full commit SHAs. Dependabot proposes
+  reviewed updates for Docker bases, Python dependencies, and Actions.
+
+See [`supply-chain.md`](supply-chain.md) for the update procedure and limits.
 
 Implemented Docker-control protections:
 
@@ -60,6 +71,15 @@ Implemented network protections:
   `git pull` when the container starts.
 - Node, statistics, updater, and watchdog containers use separate networks.
 
+Implemented runtime privilege protections:
+
+- P2Pool runs non-root with a read-only root filesystem, all capabilities
+  dropped except `IPC_LOCK`, and `no-new-privileges`. `SYS_ADMIN` is not used.
+- The statistics dashboard runs non-root under Gunicorn, uses an unprivileged
+  internal port, has a read-only root filesystem, and has no capabilities.
+- Every long-running service has a process-count limit in addition to the
+  service-specific CPU and memory limits.
+
 The firewall container necessarily has `NET_ADMIN` in the host network
 namespace. It is deliberately small, read-only, has no Docker socket or host
 mounts, and serves no port. See [`ports-and-networks.md`](ports-and-networks.md)
@@ -67,4 +87,6 @@ for the rule model and rollback command.
 
 The original production payout address and RPC health-check credential are not
 present in this repository. The health check uses restricted RPC without
-authentication.
+authentication. Automated backup verification restores only selected
+non-secret files into a temporary root-only directory; it never overwrites live
+data. See [`operations-and-recovery.md`](operations-and-recovery.md).

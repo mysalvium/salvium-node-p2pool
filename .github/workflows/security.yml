@@ -1,0 +1,44 @@
+name: Security and reproducibility
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+
+      - name: Check shell syntax and Compose policy
+        run: |
+          bash -n ops/*.sh scripts/*.sh
+          docker compose --env-file .env.example config --quiet
+          ./scripts/validate-hardening.sh .env.example
+          sudo TEST_PARENT=/tmp ./scripts/test-docker-broker.sh
+
+      - name: Build pinned images
+        env:
+          ENV_FILE: ${{ github.workspace }}/.env.example
+        run: ./scripts/build-images.sh
+
+      - name: Scan source and images; generate SBOMs
+        run: ./scripts/security-scan.sh .env.example full
+
+      - name: Preserve reports and SBOMs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: security-reports
+          path: .security-reports/
+          if-no-files-found: error
+          retention-days: 30

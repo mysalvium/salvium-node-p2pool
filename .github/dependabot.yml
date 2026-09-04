@@ -1,0 +1,24 @@
+version: 2
+updates:
+  - package-ecosystem: docker
+    directories:
+      - /docker/salviumd
+      - /docker/p2pool
+      - /docker/stats
+      - /docker/firewall
+      - /docker/management
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: pip
+    directory: /docker/stats/app
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

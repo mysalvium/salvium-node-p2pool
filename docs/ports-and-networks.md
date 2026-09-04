@@ -10,6 +10,12 @@ The client devices do not need fixed addresses. `TRUSTED_LAN_CIDRS` authorizes
 the trusted DHCP subnet as a group. If guest or IoT devices share that subnet,
 move them to a separate VLAN before treating the subnet as trusted.
 
+Docker network isolation does not divide devices on the physical home LAN.
+With `TRUSTED_LAN_CIDRS=192.168.1.0/24`, every device still placed on that main
+LAN is trusted for wallet RPC, Stratum, and the dashboard. Keep wallets and
+miners on the trusted DHCP LAN, reserve only the server address, and move
+untrusted/guest/IoT clients to an isolated guest network or VLAN.
+
 ## Port policy
 
 | Host port | Container | Function | Allowed sources | Internet forward |
@@ -136,6 +142,12 @@ Only `19080` and the active public P2Pool peer port should be considered for a
 manual forward. Do not forward `19081`, `19089`, `3333`, `38888`, or `3000` to
 the public Internet. Use a VPN to reach wallet RPC or statistics from outside
 the trusted LAN.
+
+For the original ASUS rule named `Salvium`, replace
+`19080,38888,38889 / BOTH` with TCP-only forwarding for `19080` and `38889`.
+Delete or disable the public `38888` mapping. UDP is not used by these ports.
+If the router requires one port per rule, create two TCP rules. Keep the
+destination reserved as `192.168.1.54`.
 
 Docker references:
 

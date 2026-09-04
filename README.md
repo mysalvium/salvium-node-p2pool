@@ -15,6 +15,10 @@ Detailed operator references:
   tests release checksum verification and binary rollback.
 - [`docs/docker-control-broker.md`](docs/docker-control-broker.md) explains how
   automatic restarts work without mounting the Docker socket in a container.
+- [`docs/supply-chain.md`](docs/supply-chain.md) explains pinned images,
+  dependency hashes, vulnerability scans, and software bills of materials.
+- [`docs/operations-and-recovery.md`](docs/operations-and-recovery.md) explains
+  the health monitor, verified backups, and safe recovery checks.
 
 ## What is special about this stack?
 
@@ -103,13 +107,22 @@ http://YOUR-SERVER-IP:3000
 - The Salvium daemon runs with a read-only container filesystem.
 - Linux capabilities are removed from the daemon.
 - `no-new-privileges` is enabled for the daemon.
+- P2Pool runs non-root with a read-only container filesystem, all capabilities
+  dropped except `IPC_LOCK`, and no `SYS_ADMIN`.
+- The statistics page runs non-root behind Gunicorn on an unprivileged internal
+  port, with a read-only container filesystem and no Linux capabilities.
+- Every long-running service has CPU, memory, and process-count limits.
 - Container logs rotate automatically instead of growing forever.
 - The daemon is given two minutes to shut down cleanly.
 - Updater and watchdog containers run non-root, read-only, with all Linux
   capabilities removed and without access to the Docker socket.
 - A root-owned host controller accepts only fixed restart requests for
   `salviumd` and `salvium-p2pool`; it cannot run caller-provided commands.
-- A TrueNAS/ZFS backup helper is included in `ops/backup-salvium.sh`.
+- Container bases, the statistics source, Python packages, the scanner, and
+  GitHub Actions are pinned. Weekly automation scans for secrets,
+  vulnerabilities, and configuration mistakes and produces an SBOM per image.
+- TrueNAS can run an automated five-minute health check, a weekly ZFS backup,
+  and a weekly checksum/decompression/selected-file restore test.
 - Wallets, blockchain data, logs, credentials, and local configuration are
   excluded from Git.
 
@@ -124,6 +137,7 @@ http://YOUR-SERVER-IP:3000
 | `salviumd-updater` | Checks for new Salvium daemon releases |
 | `p2pool-updater` | Checks for new P2Pool Salvium releases |
 | `p2pool-watchdog` | Monitors mining and controls public/private failover |
+| `salvium-firewall` | Enforces trusted-LAN access to private published ports |
 
 TrueNAS also runs a once-per-minute Cron Job named
 `Salvium restricted Docker controller`. It is deliberately not a container.
@@ -279,6 +293,16 @@ checksum path without installing anything:
 ./scripts/verify-release-downloads.sh
 ```
 
+Run the security gate and create local SBOM reports:
+
+```bash
+./scripts/security-scan.sh .env full
+```
+
+The scanner binary is downloaded from its pinned release and must match the
+hardcoded SHA-256 checksum before it runs. Reports are written below
+`.security-reports/`; that directory is intentionally ignored by Git.
+
 Check the services:
 
 ```bash
@@ -298,6 +322,17 @@ expected protections:
 
 Every line should report `PASS`. Do not enable automatic mode until this check
 succeeds.
+
+On TrueNAS, install the root-owned health, backup, and recovery checks after
+the stack is healthy:
+
+```bash
+./scripts/install-truenas-operations.sh install .env
+./scripts/install-truenas-operations.sh check .env
+```
+
+The installer is idempotent: running it again updates the same three Cron Jobs
+instead of creating duplicates.
 
 ### Step 6: Watch the first startup
 
@@ -515,9 +550,17 @@ docker compose --env-file .env ps stats
 docker compose --env-file .env logs --tail=100 stats
 ```
 
-## Optional TrueNAS/ZFS backup helper
+## TrueNAS health, backup, and recovery checks
 
-`ops/backup-salvium.sh` is intended for the original TrueNAS/ZFS layout. It:
+Install the supplied root-owned operations as shown in Step 5. They provide:
+
+- A live check every five minutes for container health, security settings,
+  node synchronization, fresh mining statistics, firewall rules, recent
+  backups, and Compose synchronization.
+- A weekly ZFS backup on Sunday at 03:15.
+- A weekly non-destructive backup verification on Sunday at 05:00.
+
+The backup job:
 
 1. Asks the daemon to flush blockchain data.
 2. Creates a ZFS snapshot.
@@ -525,9 +568,13 @@ docker compose --env-file .env logs --tail=100 stats
 4. Creates a SHA-256 checksum and tests the archive.
 5. Retains the newest eight weekly archives by default.
 
-This script creates and destroys ZFS snapshots and deletes expired backups.
-Review its paths and environment-variable defaults before running it. Do not
-use it unchanged on a non-ZFS server.
+The verification job checks the SHA-256 digest and compressed stream, then
+restores three non-secret marker files into a root-only temporary directory.
+It never writes into production data. See
+[`docs/operations-and-recovery.md`](docs/operations-and-recovery.md) before a
+real recovery. The backup script creates and destroys temporary ZFS snapshots
+and deletes archives beyond retention; do not use it unchanged on a non-ZFS
+server.
 
 ## Troubleshooting
 
@@ -594,16 +641,17 @@ docker compose --env-file .env logs --tail=100 salviumd
   updater or watchdog could request a rate-limited restart of its assigned
   target, but cannot select another container or submit a host command. See
   `docs/docker-control-broker.md`.
-- P2Pool currently receives `SYS_ADMIN` and `IPC_LOCK` for the production
-  hugepage/memory configuration.
+- P2Pool runs without `SYS_ADMIN`; an isolated public/private startup test is
+  provided in `scripts/test-p2pool-reduced-privileges.sh`.
 - Unrestricted daemon RPC is never published on the Docker host. Restricted
   RPC, Stratum, statistics, and private P2Pool traffic are bound to the LAN
   address and filtered by trusted source subnet. See
   `docs/ports-and-networks.md`.
 - Binary downloads are SHA-256 verified, but checksums come from the same
   upstream release channel rather than an independent digital signature.
-  Some container-image references are not yet pinned by digest. The statistics
-  source is pinned to a reviewed commit. See `docs/security.md`.
+  Container bases and the statistics source are pinned; automated scans and
+  dependency-update pull requests still require human review. See
+  `docs/security.md` and `docs/supply-chain.md`.
 
 ## What is intentionally not included?
 
