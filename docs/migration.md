@@ -16,12 +16,15 @@ Recommended sequence:
 3. Clone this repository to a new host directory; keep the existing data path.
 4. Create `.env` locally and confirm the payout wallet and path values.
 5. Run `docker compose config` and a secret scan.
-6. Build the four local images without stopping production.
-7. Test against disposable data and non-production host ports.
-8. Resolve ownership of the existing unlabeled `salviumd` container before
+6. Install the root-owned Docker broker and verify its TrueNAS Cron Job.
+7. Build the five local images without stopping production.
+8. Test against disposable data and non-production host ports.
+9. Resolve ownership of the existing unlabeled `salviumd` container before
    allowing Compose to create a container with the same name.
-9. Cut over during a maintenance window with a tested rollback procedure.
-10. Convert Portainer to a Git-backed stack only after the local deployment is
+10. Cut over during a maintenance window with a tested rollback procedure.
+11. Confirm that no container mounts the Docker socket and that broker status
+    remains fresh before enabling automatic failover.
+12. Convert Portainer to a Git-backed stack only after the local deployment is
     proven and repository access is configured.
 
 The production cutover must also coordinate the dependent services:

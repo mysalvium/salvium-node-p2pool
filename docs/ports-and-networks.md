@@ -79,6 +79,9 @@ See the [P2Pool command-line reference](https://github.com/SChernykh/p2pool/blob
 The statistics application receives P2Pool data through a read-only bind mount;
 it does not need to share a Docker network with the node. Updaters and the
 watchdog retain outbound access but do not share the node network.
+Their Docker-control requests travel through dedicated filesystem directories,
+not through a network API or the Docker socket. The host broker has no
+listening port. See [`docker-control-broker.md`](docker-control-broker.md).
 
 Private mode requires at least one reachable P2Pool peer from the private
 mode's `p2pool_peers.txt`. DHCP mining clients are Stratum clients, not P2Pool

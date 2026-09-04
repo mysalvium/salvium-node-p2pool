@@ -1,9 +1,15 @@
 # Automatic release downloads
 
 The stack checks for new Salvium and P2Pool releases every six hours by
-default. An updater restarts only the affected service when the upstream tag
-differs from the persistent `.current_version` marker. The service entrypoint
-then performs the download and verification.
+default. When an upstream tag differs from the persistent `.current_version`
+marker, the updater writes a request to its dedicated broker directory. The
+root-owned host broker restarts only the hardcoded affected service. Its
+entrypoint then performs the download and verification.
+
+The updater containers do not have Docker-socket access. They run as the
+configured non-root account with read-only root filesystems, no Linux
+capabilities, and `no-new-privileges`. See
+[`docker-control-broker.md`](docker-control-broker.md).
 
 ## Verification guarantees
 
@@ -65,6 +71,7 @@ docker logs --tail 100 salviumd
 docker logs --tail 100 salvium-p2pool
 docker logs --tail 100 salviumd-updater
 docker logs --tail 100 p2pool-updater
+./scripts/install-truenas-docker-broker.sh check .env
 ```
 
 Do not delete `.previous` until the replacement has run successfully through a

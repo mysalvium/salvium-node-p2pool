@@ -26,6 +26,8 @@ SALVIUMD_IMAGE="${SALVIUMD_IMAGE:-salviumd:local}"
 P2POOL_IMAGE="${P2POOL_IMAGE:-p2pool-salvium:local}"
 STATS_IMAGE="${STATS_IMAGE:-salvium-stats:local}"
 FIREWALL_IMAGE="${FIREWALL_IMAGE:-salvium-firewall:local}"
+MANAGEMENT_IMAGE="${MANAGEMENT_IMAGE:-salvium-management:local}"
+ALPINE_IMAGE="${ALPINE_IMAGE:-alpine:3.20}"
 STATS_SOURCE_COMMIT="${STATS_SOURCE_COMMIT:-a0fed9e186fa85d16eefdaf62bd6dbecadb629af}"
 
 G='\033[0;32m'; Y='\033[1;33m'; NC='\033[0m'
@@ -53,6 +55,10 @@ docker build --build-arg "STATS_SOURCE_COMMIT=$STATS_SOURCE_COMMIT" -t "$STATS_I
 # ── host ingress policy ─────────────────────────────────────────────────────
 info "Building ${FIREWALL_IMAGE} ..."
 docker build -t "$FIREWALL_IMAGE" "$BUILD_DIR/firewall"
+
+# ── socket-free updater/watchdog runtime ────────────────────────────────────
+info "Building ${MANAGEMENT_IMAGE} ..."
+docker build --build-arg "ALPINE_IMAGE=$ALPINE_IMAGE" -t "$MANAGEMENT_IMAGE" "$BUILD_DIR/management"
 
 echo ""
 info "All images built:"

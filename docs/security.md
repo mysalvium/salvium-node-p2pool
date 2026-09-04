@@ -21,10 +21,29 @@ verified digital signature would provide stronger publisher authentication.
 
 Before production use:
 
-- Pin base images and `docker:cli` by version or digest.
+- Pin remaining base images by digest.
 - Determine whether P2Pool can run without `SYS_ADMIN`.
-- Consider replacing Docker-socket access with a narrower update mechanism.
 - Run a secret scanner before every release and before adding any Git remote.
+
+Implemented Docker-control protections:
+
+- No container mounts `/var/run/docker.sock`.
+- The updater and watchdog containers run non-root with read-only root
+  filesystems, all capabilities dropped, and `no-new-privileges`.
+- Each controller can write only to its dedicated request directory. It cannot
+  choose a container name or provide a command.
+- A root-owned host broker maps requests to the fixed `salviumd` or
+  `salvium-p2pool` target, coalesces duplicate requests, rate-limits restarts,
+  and rejects symlinks, unexpected owners, oversized files, and malformed
+  identifiers.
+- The root-executed broker copy and configuration live in a root-only data
+  directory that is not mounted into any container. TrueNAS schedules that
+  installed copy rather than the Git working-tree source.
+
+This boundary limits a compromised controller to requesting a rate-limited
+restart of its assigned service. The broker itself remains trusted root code
+and must retain root-only ownership. See
+[`docker-control-broker.md`](docker-control-broker.md).
 
 Implemented network protections:
 

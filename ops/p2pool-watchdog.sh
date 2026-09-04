@@ -1,6 +1,6 @@
 #!/bin/sh
 # =============================================================================
-# salvium-p2pool mode watchdog  (v3 — peer-aware fallback)
+# salvium-p2pool mode watchdog  (v4 — restricted host control)
 #
 # Keeps p2pool on the PUBLIC sidechain ("home") and falls back to the PRIVATE
 # sidechain when public stops earning, then returns once public is healthy
@@ -51,6 +51,14 @@
 # =============================================================================
 set -u
 
+BROKER_CLIENT_FILE=${BROKER_CLIENT_FILE:-/ops/request-docker-restart.sh}
+if [ ! -r "$BROKER_CLIENT_FILE" ]; then
+    echo "watchdog: broker client is unavailable: $BROKER_CLIENT_FILE" >&2
+    exit 1
+fi
+# shellcheck disable=SC1090
+. "$BROKER_CLIENT_FILE"
+
 CONTROL=${CONTROL_DIR:-/control}
 STATS=${STATS_DIR:-/stats}
 LIVE_PEERS=${LIVE_PEERS_DIR:-/peers-live}
@@ -64,7 +72,6 @@ DWELL=${DWELL:-3600}                      # 1h minimum in a mode
 TRIAL_WINDOW=${TRIAL_WINDOW:-300}         # 5m for a trial to prove itself
 STALE_STATS=${STALE_STATS:-300}           # stats older than this = unhealthy
 HEIGHT_STALL=${HEIGHT_STALL:-600}         # height frozen this long = unhealthy
-STOP_TIMEOUT=${STOP_TIMEOUT:-60}          # grace seconds on p2pool restart
 PROBE_MIN_OK=${PROBE_MIN_OK:-2}           # peers that must answer for a pass
 PRIVATE_PROBE_MIN_OK=${PRIVATE_PROBE_MIN_OK:-1}
 PROBE_MAX=${PROBE_MAX:-24}                # cap on probe targets per pass
@@ -88,11 +95,17 @@ peers()      { json_num "$STATS/local/p2p"   '[{,]"connections"'; }
 sc_height()  { json_num "$STATS/pool/stats"  '"sidechainHeight"'; }
 file_mtime() { stat -c %Y "$1" 2>/dev/null || echo 0; }
 
-# One docker inspect per call site instead of two (status + restart count).
+# The root-owned host broker publishes only P2Pool status and restart count.
+# The watchdog has no Docker socket and treats a missing/stale snapshot as an
+# unknown container state.
 dk_state() {  # sets DK_STATUS / DK_RESTARTS
-    set -- $(docker inspect "$TARGET" --format '{{.State.Status}} {{.RestartCount}}' 2>/dev/null || echo "unknown -1")
-    DK_STATUS=${1:-unknown}
-    DK_RESTARTS=${2:--1}
+    if broker_read_p2pool_state; then
+        DK_STATUS=$BROKER_CONTAINER_STATUS
+        DK_RESTARTS=$BROKER_CONTAINER_RESTARTS
+    else
+        DK_STATUS=unknown
+        DK_RESTARTS=-1
+    fi
 }
 
 read_ctl() {  # read_ctl <file> <default>
@@ -247,7 +260,7 @@ switch_to() {  # switch_to <mode> <reason>
     _to=$1; _why=$2; _from=$active
     log "SWITCHING ${_from} -> ${_to}: ${_why}"
     printf '%s\n' "$_to" > "$CONTROL/active"
-    if docker restart -t "$STOP_TIMEOUT" "$TARGET" >/dev/null 2>&1; then
+    if broker_restart "watchdog mode switch ${_from} -> ${_to}"; then
         printf '%s  %-7s  %s\n' "$(ts)" "$_to" "$_why" >> "$CONTROL/switch.log"
         active=$_to
         known_active=$_to
@@ -264,8 +277,8 @@ switch_to() {  # switch_to <mode> <reason>
         return 0
     fi
     printf '%s\n' "$_from" > "$CONTROL/active"
-    printf '%s  %-7s  %s\n' "$(ts)" "$_from" "REVERTED: docker restart failed during switch to ${_to}" >> "$CONTROL/switch.log"
-    log "ERROR: docker restart of $TARGET failed -- active reverted to ${_from}; will retry"
+    printf '%s  %-7s  %s\n' "$(ts)" "$_from" "REVERTED: restricted host restart failed during switch to ${_to}" >> "$CONTROL/switch.log"
+    log "ERROR: restricted restart of $TARGET failed -- active reverted to ${_from}; will retry"
     return 1
 }
 
@@ -462,11 +475,13 @@ while true; do
             if [ "$bad_for" -ge "$FAIL_AFTER" ]; then
                 log "private instance unhealthy ${bad_for}s (${verdict}) -- remedial restart in place"
                 printf '%s  %-7s  %s\n' "$(ts)" "private" "REMEDIAL restart: ${verdict}" >> "$CONTROL/switch.log"
-                docker restart -t "$STOP_TIMEOUT" "$TARGET" >/dev/null 2>&1 \
-                    || log "remedial restart failed -- will retry"
-                unhealthy_since=0
-                last_start=$(now)
-                dk_state; last_restarts=$DK_RESTARTS
+                if broker_restart "watchdog remedial private-mode restart"; then
+                    unhealthy_since=0
+                    last_start=$(now)
+                    dk_state; last_restarts=$DK_RESTARTS
+                else
+                    log "remedial restricted restart failed -- will retry"
+                fi
             fi
             write_state "degraded-private" "$verdict"
         else

@@ -17,11 +17,17 @@ Persistent data lives below `SALVIUM_DATA_ROOT`. Operational scripts are read
 from `SALVIUM_APP_ROOT/ops`. No named Docker volumes are used.
 
 The updater containers periodically compare local version marker files with
-the latest upstream release. A version change causes the target container to
-restart; its entrypoint then downloads the new binary into the persistent
-binary directory after checksum verification. The watchdog reads P2Pool
-statistics and control state and can restart P2Pool when switching between
-public and private modes. See [`automatic-downloads.md`](automatic-downloads.md).
+the latest upstream release. The watchdog reads P2Pool statistics and control
+state. None of those three containers has Docker-socket access. They submit
+fixed restart requests through separate bind-mounted directories.
+
+A root-owned host broker scheduled by TrueNAS once per minute maps each
+directory to an allowlisted target, coalesces duplicate P2Pool requests,
+enforces a five-minute per-target rate limit, and performs the restart. It also
+publishes a read-only P2Pool state snapshot for the watchdog. The broker is
+installed outside the Git working tree and is not mounted by any container.
+See [`docker-control-broker.md`](docker-control-broker.md) and
+[`automatic-downloads.md`](automatic-downloads.md).
 
 The Compose file retains the production resource limits and hardening:
 
@@ -31,4 +37,6 @@ The Compose file retains the production resource limits and hardening:
   `SYS_ADMIN`.
 - Firewall: read-only root, only `NET_ADMIN`, host networking, no Docker socket,
   no host filesystem mount, and no listening service.
+- Updaters and watchdog: non-root, read-only root filesystems, all capabilities
+  dropped, `no-new-privileges`, and no Docker socket.
 - JSON-file logs rotate at three 10 MiB files per service.

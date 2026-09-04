@@ -23,10 +23,13 @@ services:
           mkdir -p "$$d"
           chown -R ${PUID:-1000}:${PGID:-1000} "$$d"
         done
+        for d in /mnt/request-salviumd /mnt/request-p2pool /mnt/request-watchdog; do
+          mkdir -p "$$d"
+          chown ${PUID:-1000}:${PGID:-1000} "$$d"
+          chmod 0770 "$$d"
+        done
         mkdir -p /mnt/p2pool/public /mnt/p2pool/private
         chown -R ${PUID:-1000}:${PGID:-1000} /mnt/p2pool/public /mnt/p2pool/private
-        chown -R ${PUID:-1000}:${PGID:-1000} /mnt/ops
-        chmod -R a+rX /mnt/ops
         echo "Permissions fixed."
     volumes:
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/salviumd:/mnt/salviumd"
@@ -34,7 +37,9 @@ services:
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool:/mnt/p2pool"
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool-stats:/mnt/p2pool-stats"
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool-control:/mnt/p2pool-control"
-      - "${SALVIUM_APP_ROOT:?Set SALVIUM_APP_ROOT in .env}/ops:/mnt/ops"
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/docker-control/requests/salviumd-updater:/mnt/request-salviumd"
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/docker-control/requests/p2pool-updater:/mnt/request-p2pool"
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/docker-control/requests/p2pool-watchdog:/mnt/request-watchdog"
 
   salviumd:
     image: ${SALVIUMD_IMAGE:-salviumd:local}
@@ -154,13 +159,21 @@ services:
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool:/home/p2pool/.p2pool"
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool-stats:/home/p2pool/stats"
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool-control:/control:ro"
-      - "${SALVIUM_APP_ROOT:?Set SALVIUM_APP_ROOT in .env}/ops:/ops:ro"
+      - "${SALVIUM_APP_ROOT:?Set SALVIUM_APP_ROOT in .env}/ops/switch-entrypoint.sh:/ops/switch-entrypoint.sh:ro"
       - /dev/hugepages:/dev/hugepages
 
   salviumd-updater:
-    image: ${DOCKER_CLI_IMAGE:-docker:cli}
+    image: ${MANAGEMENT_IMAGE:-salvium-management:local}
     container_name: salviumd-updater
+    user: "${PUID:-1000}:${PGID:-1000}"
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
     depends_on:
       salviumd:
@@ -169,34 +182,44 @@ services:
     environment:
       CHECK_INTERVAL: "${UPDATE_CHECK_INTERVAL:-21600}"
       RELEASES_API: https://api.github.com/repos/salvium/salvium/releases/latest
-      STOP_TIMEOUT: "120"
-      TARGET_CONTAINER: salviumd
       VERSION_FILE: /binmeta/.current_version
+      BROKER_REQUEST_DIR: /broker
+      BROKER_REQUEST_TIMEOUT: "240"
     command:
       - |
-        apk add --no-cache curl jq >/dev/null 2>&1 || true
+        tr -d '\r' < /ops/request-docker-restart.sh > /tmp/request-docker-restart.sh
+        . /tmp/request-docker-restart.sh
         echo "[updater] started; checking every $${CHECK_INTERVAL}s"
         while true; do
           LATEST=$$(curl -sf --proto '=https' --proto-redir '=https' --tlsv1.2 --max-time 20 "$${RELEASES_API}" | jq -r '.tag_name // empty' 2>/dev/null || true)
           CURRENT=$$(cat "$${VERSION_FILE}" 2>/dev/null || true)
           if [ -n "$${LATEST}" ] && [ -f "$${VERSION_FILE}" ] && [ "$${LATEST}" != "$${CURRENT}" ]; then
-            echo "[updater] new version $${LATEST} (installed $${CURRENT:-none}) - restarting $${TARGET_CONTAINER}"
-            docker restart -t "$${STOP_TIMEOUT}" "$${TARGET_CONTAINER}" || echo "[updater] restart failed"
+            echo "[updater] new version $${LATEST} (installed $${CURRENT:-none})"
+            broker_restart "Salvium update $${CURRENT:-none} -> $${LATEST}" || echo "[updater] restricted restart request failed"
           else
             echo "[updater] no update (installed $${CURRENT:-unknown}, latest $${LATEST:-unreachable})"
           fi
           sleep "$${CHECK_INTERVAL}"
         done
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/salviumd-bin:/binmeta:ro"
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/docker-control/requests/salviumd-updater:/broker:rw"
+      - "${SALVIUM_APP_ROOT:?Set SALVIUM_APP_ROOT in .env}/ops/request-docker-restart.sh:/ops/request-docker-restart.sh:ro"
     networks:
       - management
 
   p2pool-updater:
-    image: ${DOCKER_CLI_IMAGE:-docker:cli}
+    image: ${MANAGEMENT_IMAGE:-salvium-management:local}
     container_name: p2pool-updater
+    user: "${PUID:-1000}:${PGID:-1000}"
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
     depends_on:
       p2pool:
@@ -205,34 +228,44 @@ services:
     environment:
       CHECK_INTERVAL: "${UPDATE_CHECK_INTERVAL:-21600}"
       RELEASES_API: https://gitlab.com/api/v4/projects/whiskyrelaxing-group%2Fp2pool-salvium-releases/releases
-      STOP_TIMEOUT: "60"
-      TARGET_CONTAINER: salvium-p2pool
       VERSION_FILE: /binmeta/bin/.current_version
+      BROKER_REQUEST_DIR: /broker
+      BROKER_REQUEST_TIMEOUT: "240"
     command:
       - |
-        apk add --no-cache curl jq >/dev/null 2>&1 || true
+        tr -d '\r' < /ops/request-docker-restart.sh > /tmp/request-docker-restart.sh
+        . /tmp/request-docker-restart.sh
         echo "[p2pool-updater] started; checking every $${CHECK_INTERVAL}s"
         while true; do
           LATEST=$$(curl -sf --proto '=https' --proto-redir '=https' --tlsv1.2 --max-time 20 "$${RELEASES_API}" | jq -r '.[0].tag_name // empty' 2>/dev/null || true)
           CURRENT=$$(cat "$${VERSION_FILE}" 2>/dev/null || true)
           if [ -n "$${LATEST}" ] && [ -f "$${VERSION_FILE}" ] && [ "$${LATEST}" != "$${CURRENT}" ]; then
-            echo "[p2pool-updater] new version $${LATEST} (installed $${CURRENT:-none}) - restarting $${TARGET_CONTAINER}"
-            docker restart -t "$${STOP_TIMEOUT}" "$${TARGET_CONTAINER}" || echo "[p2pool-updater] restart failed"
+            echo "[p2pool-updater] new version $${LATEST} (installed $${CURRENT:-none})"
+            broker_restart "P2Pool update $${CURRENT:-none} -> $${LATEST}" || echo "[p2pool-updater] restricted restart request failed"
           else
             echo "[p2pool-updater] no update (installed $${CURRENT:-unknown}, latest $${LATEST:-unreachable})"
           fi
           sleep "$${CHECK_INTERVAL}"
         done
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool:/binmeta:ro"
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/docker-control/requests/p2pool-updater:/broker:rw"
+      - "${SALVIUM_APP_ROOT:?Set SALVIUM_APP_ROOT in .env}/ops/request-docker-restart.sh:/ops/request-docker-restart.sh:ro"
     networks:
       - management
 
   p2pool-watchdog:
-    image: ${DOCKER_CLI_IMAGE:-docker:cli}
+    image: ${MANAGEMENT_IMAGE:-salvium-management:local}
     container_name: p2pool-watchdog
+    user: "${PUID:-1000}:${PGID:-1000}"
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
     depends_on:
       p2pool:
@@ -240,7 +273,7 @@ services:
     entrypoint:
       - /bin/sh
       - -c
-      - 'mkdir -p /tmp/ops && tr -d "\r" < /ops/p2pool-watchdog.sh > /tmp/ops/p2pool-watchdog.sh && exec /bin/sh /tmp/ops/p2pool-watchdog.sh'
+      - 'mkdir -p /tmp/ops && tr -d "\r" < /ops/p2pool-watchdog.sh > /tmp/ops/p2pool-watchdog.sh && tr -d "\r" < /ops/request-docker-restart.sh > /tmp/ops/request-docker-restart.sh && exec /bin/sh /tmp/ops/p2pool-watchdog.sh'
       - p2pool-watchdog
     environment:
       CHECK_INTERVAL: "${WATCHDOG_CHECK_INTERVAL:-60}"
@@ -253,15 +286,21 @@ services:
       PROBE_MIN_OK: "${WATCHDOG_PROBE_MIN_OK:-2}"
       PRIVATE_PROBE_MIN_OK: "${WATCHDOG_PRIVATE_PROBE_MIN_OK:-1}"
       PRIVATE_PEERS_FILE: /private-peers/p2pool_peers.txt
-      STOP_TIMEOUT: "60"
       TARGET_CONTAINER: salvium-p2pool
+      BROKER_CLIENT_FILE: /tmp/ops/request-docker-restart.sh
+      BROKER_REQUEST_DIR: /broker
+      BROKER_REQUEST_TIMEOUT: "240"
+      BROKER_STATUS_FILE: /docker-status/p2pool.state
+      BROKER_STATUS_STALE: "180"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool-control:/control"
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool-stats:/stats:ro"
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool/public:/peers-live:ro"
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool/private:/private-peers:ro"
-      - "${SALVIUM_APP_ROOT:?Set SALVIUM_APP_ROOT in .env}/ops:/ops:ro"
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/docker-control/requests/p2pool-watchdog:/broker:rw"
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/docker-control/status:/docker-status:ro"
+      - "${SALVIUM_APP_ROOT:?Set SALVIUM_APP_ROOT in .env}/ops/p2pool-watchdog.sh:/ops/p2pool-watchdog.sh:ro"
+      - "${SALVIUM_APP_ROOT:?Set SALVIUM_APP_ROOT in .env}/ops/request-docker-restart.sh:/ops/request-docker-restart.sh:ro"
     networks:
       - management
 

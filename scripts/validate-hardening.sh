@@ -33,6 +33,20 @@ check "stats is isolated from the node network" \
   '(.services.stats.networks | has("node")) == false'
 check "management services are isolated from the node network" \
   '[.services["salviumd-updater"], .services["p2pool-updater"], .services["p2pool-watchdog"]] | all((.networks | has("node")) == false)'
+check "no container mounts the Docker socket" \
+  '[.services | to_entries[].value | (.volumes // [])[]?] | all(.source != "/var/run/docker.sock")'
+check "management services run non-root with read-only filesystems" \
+  '[.services["salviumd-updater"], .services["p2pool-updater"], .services["p2pool-watchdog"]] | all((.user | length > 0) and .user != "0" and .user != "0:0" and .read_only == true)'
+check "management services drop capabilities and prevent privilege escalation" \
+  '[.services["salviumd-updater"], .services["p2pool-updater"], .services["p2pool-watchdog"]] | all((.cap_drop | index("ALL") != null) and ([.security_opt[] | startswith("no-new-privileges")] | any))'
+check "each management service has only its dedicated broker request directory" \
+  '(.services["salviumd-updater"].volumes | any(.target == "/broker" and ((.read_only // false) == false))) and
+   (.services["p2pool-updater"].volumes | any(.target == "/broker" and ((.read_only // false) == false))) and
+   (.services["p2pool-watchdog"].volumes | any(.target == "/broker" and ((.read_only // false) == false)))'
+check "watchdog receives broker status read-only" \
+  '.services["p2pool-watchdog"].volumes | any(.target == "/docker-status" and .read_only == true)'
+check "root broker source is not mounted into any container" \
+  '[.services | to_entries[].value | (.volumes // [])[]?] | all(.target != "/ops" and (.source | endswith("/salvium-docker-broker.sh") | not))'
 check "firewall has NET_ADMIN but no Docker socket mount" \
   '(.services.firewall.cap_add | index("NET_ADMIN") != null) and ((.services.firewall.volumes // []) | length == 0)'
 
@@ -49,5 +63,13 @@ echo "PASS: firewall filtering applies only to original inbound host-port traffi
 
 grep -Fq 'ipt -C INPUT -j "$HOST_CHAIN"' docker/firewall/salvium-firewall.sh
 echo "PASS: firewall also covers same-host Docker bridge traffic"
+
+grep -Fq 'process_target salviumd 120 salviumd-updater' ops/salvium-docker-broker.sh
+grep -Fq 'process_target salvium-p2pool 60 p2pool-updater p2pool-watchdog' ops/salvium-docker-broker.sh
+if grep -Eq 'eval|sh -c|bash -c' ops/salvium-docker-broker.sh; then
+  echo "FAIL: host broker must not evaluate caller-controlled commands" >&2
+  exit 1
+fi
+echo "PASS: host broker uses fixed targets and has no command evaluator"
 
 echo "All Compose hardening checks passed."

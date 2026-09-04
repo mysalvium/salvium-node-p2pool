@@ -13,6 +13,8 @@ Detailed operator references:
   port, DHCP-aware access rule, Docker network, and firewall boundary.
 - [`docs/automatic-downloads.md`](docs/automatic-downloads.md) explains and
   tests release checksum verification and binary rollback.
+- [`docs/docker-control-broker.md`](docs/docker-control-broker.md) explains how
+  automatic restarts work without mounting the Docker socket in a container.
 
 ## What is special about this stack?
 
@@ -22,8 +24,8 @@ The stack checks upstream releases every six hours by default:
 
 - `salviumd-updater` checks the official Salvium GitHub releases.
 - `p2pool-updater` checks the P2Pool Salvium GitLab releases.
-- When a newer release is found, the updater restarts only the affected
-  container.
+- When a newer release is found, the updater asks a restricted host controller
+  to restart only the affected container.
 - During that restart, the container downloads the new release and verifies
   its SHA-256 checksum against the checksum published by the same upstream
   release.
@@ -103,6 +105,10 @@ http://YOUR-SERVER-IP:3000
 - `no-new-privileges` is enabled for the daemon.
 - Container logs rotate automatically instead of growing forever.
 - The daemon is given two minutes to shut down cleanly.
+- Updater and watchdog containers run non-root, read-only, with all Linux
+  capabilities removed and without access to the Docker socket.
+- A root-owned host controller accepts only fixed restart requests for
+  `salviumd` and `salvium-p2pool`; it cannot run caller-provided commands.
 - A TrueNAS/ZFS backup helper is included in `ops/backup-salvium.sh`.
 - Wallets, blockchain data, logs, credentials, and local configuration are
   excluded from Git.
@@ -118,6 +124,10 @@ http://YOUR-SERVER-IP:3000
 | `salviumd-updater` | Checks for new Salvium daemon releases |
 | `p2pool-updater` | Checks for new P2Pool Salvium releases |
 | `p2pool-watchdog` | Monitors mining and controls public/private failover |
+
+TrueNAS also runs a once-per-minute Cron Job named
+`Salvium restricted Docker controller`. It is deliberately not a container.
+It is the only automatic component permitted to talk to Docker.
 
 ## Before you begin
 
@@ -222,8 +232,23 @@ pinned to public mode.
 
 ### Step 4: Check the configuration
 
-Create or validate the no-Internet network used by authorized server-side
-wallet services, then check the Compose policy:
+Install the restricted host controller first. On TrueNAS, run:
+
+```bash
+./scripts/install-truenas-docker-broker.sh install .env
+```
+
+Run that command as `root`, or prefix it with `sudo` on systems where root SSH
+is disabled. It copies the controller into a root-only data directory and
+creates an idempotent once-per-minute TrueNAS Cron Job. The root task never
+executes a script directly from the Git working tree.
+
+The supplied automatic installer targets TrueNAS SCALE. On another Linux
+Docker host, follow the equivalent root-owned Cron instructions in
+[`docs/docker-control-broker.md`](docs/docker-control-broker.md).
+
+Next, create or validate the no-Internet network used by authorized
+server-side wallet services, then check the Compose policy:
 
 ```bash
 ./scripts/create-privileged-network.sh .env
@@ -243,7 +268,7 @@ Run:
 docker compose --env-file .env up -d
 ```
 
-The first command builds the four local images from the reviewed files in this
+The first command builds the five local images from the reviewed files in this
 repository. The second command starts them. The first start can take several
 minutes because the containers download current Salvium and P2Pool binaries.
 
@@ -263,6 +288,16 @@ docker compose --env-file .env ps
 The one-time `perms` service should show that it exited successfully. The main
 services should be running; `salviumd` may show `starting` until its health
 check passes.
+
+Confirm that the host controller and all three management containers have the
+expected protections:
+
+```bash
+./scripts/install-truenas-docker-broker.sh check .env
+```
+
+Every line should report `PASS`. Do not enable automatic mode until this check
+succeeds.
 
 ### Step 6: Watch the first startup
 
@@ -554,8 +589,11 @@ docker compose --env-file .env logs --tail=100 salviumd
 - Never put a seed phrase, private spend key, wallet password, or Portainer
   token in this repository.
 - The health check uses local restricted RPC and contains no RPC credential.
-- The updater and watchdog containers mount the Docker socket. Anyone who can
-  change those containers or their scripts can control Docker on the host.
+- No container mounts the Docker socket. The root-owned host controller can
+  inspect P2Pool and restart only `salviumd` or `salvium-p2pool`. A compromised
+  updater or watchdog could request a rate-limited restart of its assigned
+  target, but cannot select another container or submit a host command. See
+  `docs/docker-control-broker.md`.
 - P2Pool currently receives `SYS_ADMIN` and `IPC_LOCK` for the production
   hugepage/memory configuration.
 - Unrestricted daemon RPC is never published on the Docker host. Restricted
