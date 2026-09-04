@@ -1,6 +1,6 @@
 #!/bin/sh
 # =============================================================================
-# salvium-p2pool mode watchdog  (v2 — post-review hardened)
+# salvium-p2pool mode watchdog  (v3 — peer-aware fallback)
 #
 # Keeps p2pool on the PUBLIC sidechain ("home") and falls back to the PRIVATE
 # sidechain when public stops earning, then returns once public is healthy
@@ -54,6 +54,7 @@ set -u
 CONTROL=${CONTROL_DIR:-/control}
 STATS=${STATS_DIR:-/stats}
 LIVE_PEERS=${LIVE_PEERS_DIR:-/peers-live}
+PRIVATE_PEERS_FILE=${PRIVATE_PEERS_FILE:-/private-peers/p2pool_peers.txt}
 TARGET=${TARGET_CONTAINER:-salvium-p2pool}
 
 CHECK_INTERVAL=${CHECK_INTERVAL:-60}      # seconds between evaluations
@@ -65,6 +66,7 @@ STALE_STATS=${STALE_STATS:-300}           # stats older than this = unhealthy
 HEIGHT_STALL=${HEIGHT_STALL:-600}         # height frozen this long = unhealthy
 STOP_TIMEOUT=${STOP_TIMEOUT:-60}          # grace seconds on p2pool restart
 PROBE_MIN_OK=${PROBE_MIN_OK:-2}           # peers that must answer for a pass
+PRIVATE_PROBE_MIN_OK=${PRIVATE_PROBE_MIN_OK:-1}
 PROBE_MAX=${PROBE_MAX:-24}                # cap on probe targets per pass
 CRASH_WINDOW=${CRASH_WINDOW:-1800}        # crashes within this chain a streak
 
@@ -128,6 +130,26 @@ probe_public() {
     _ok=$(wc -l < "$_tmp" 2>/dev/null | tr -d ' ')
     rm -f "$_tmp"
     [ "${_ok:-0}" -ge "$PROBE_MIN_OK" ]
+}
+
+# Do not automatically leave a degraded public instance for a private
+# sidechain that has no reachable peer. Manual private pinning remains
+# available for planned maintenance and first-time peer bootstrap work.
+probe_private() {
+    _list=$(sed 's/[[:space:]]//g' "$PRIVATE_PEERS_FILE" 2>/dev/null \
+             | grep -v '^#' | grep -v '^$' | sort -u | head -n "$PROBE_MAX")
+    [ -n "$_list" ] || return 1
+    _tmp=$(mktemp /tmp/private-probe.XXXXXX) || return 1
+    for _t in $_list; do
+        _h=${_t%:*}
+        _p=${_t##*:}
+        [ -n "$_h" ] && [ -n "$_p" ] && [ "$_h" != "$_p" ] || continue
+        ( nc -z -w 3 "$_h" "$_p" >/dev/null 2>&1 && echo ok >> "$_tmp" ) &
+    done
+    wait
+    _ok=$(wc -l < "$_tmp" 2>/dev/null | tr -d ' ')
+    rm -f "$_tmp"
+    [ "${_ok:-0}" -ge "$PRIVATE_PROBE_MIN_OK" ]
 }
 
 # ---------------------------------------------------------------------------
@@ -393,9 +415,15 @@ while true; do
             else
                 trial_started=0
                 trial_fail_count=$((trial_fail_count + 1))
-                switch_to private "trial return failed (advances=${trial_advances}, ${verdict}) fail#${trial_fail_count}" \
-                    || log "fallback after failed trial ALSO failed to restart -- retrying next cycle"
-                write_state "fallback" "trial failed (${verdict})"
+                if probe_private; then
+                    switch_to private "trial return failed (advances=${trial_advances}, ${verdict}) fail#${trial_fail_count}" \
+                        || log "fallback after failed trial ALSO failed to restart -- retrying next cycle"
+                    write_state "fallback" "trial failed (${verdict})"
+                else
+                    unhealthy_since=$(now)
+                    log "trial failed, but private peers are unavailable -- holding public"
+                    write_state "degraded" "trial failed; private peers unavailable"
+                fi
             fi
         fi
         sleep "$CHECK_INTERVAL"
@@ -412,9 +440,14 @@ while true; do
             [ "$unhealthy_since" -eq 0 ] && { unhealthy_since=$(now); log "public unhealthy: ${verdict}"; }
             bad_for=$(( $(now) - unhealthy_since ))
             if [ "$bad_for" -ge "$FAIL_AFTER" ] && [ "$dwell_ok" = "yes" ] && still_auto; then
-                switch_to private "public unhealthy ${bad_for}s (${verdict})" \
-                    || log "fallback switch failed -- retrying next cycle"
-                write_state "fallback" "left public: ${verdict}"
+                if probe_private; then
+                    switch_to private "public unhealthy ${bad_for}s (${verdict})" \
+                        || log "fallback switch failed -- retrying next cycle"
+                    write_state "fallback" "left public: ${verdict}"
+                else
+                    log "public unhealthy, but private peers are unavailable -- holding public"
+                    write_state "degraded" "${verdict}; private peers unavailable"
+                fi
             else
                 log "public unhealthy ${bad_for}/${FAIL_AFTER}s (${verdict}) dwell_ok=${dwell_ok}"
                 write_state "degraded" "$verdict"

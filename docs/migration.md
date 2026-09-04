@@ -16,13 +16,28 @@ Recommended sequence:
 3. Clone this repository to a new host directory; keep the existing data path.
 4. Create `.env` locally and confirm the payout wallet and path values.
 5. Run `docker compose config` and a secret scan.
-6. Build the three local images without stopping production.
+6. Build the four local images without stopping production.
 7. Test against disposable data and non-production host ports.
 8. Resolve ownership of the existing unlabeled `salviumd` container before
    allowing Compose to create a container with the same name.
 9. Cut over during a maintenance window with a tested rollback procedure.
 10. Convert Portainer to a Git-backed stack only after the local deployment is
     proven and repository access is configured.
+
+The production cutover must also coordinate the dependent services:
+
+- Attach the two staker wallet-RPC containers to the external
+  `salvium_privileged_rpc` network and change their daemon address to
+  `salviumd:19081` before removing their ordinary egress network.
+- Change the Hummingbot view-only wallet RPC from host port `19081` to
+  restricted host port `19089`; it does not require privileged daemon methods.
+- Confirm those three clients are healthy before declaring the unrestricted
+  host-port removal successful.
+- Run `scripts/verify-release-downloads.sh` before the cutover and retain both
+  persistent `.previous` binaries.
+
+See [`ports-and-networks.md`](ports-and-networks.md) for the final topology and
+[`automatic-downloads.md`](automatic-downloads.md) for release verification.
 
 The legacy migration scripts from the server are intentionally omitted because
 they stop containers and mutate production directories.

@@ -12,6 +12,7 @@ services:
     container_name: salvium-perms
     user: "0:0"
     restart: "no"
+    network_mode: none
     logging: *default-logging
     command:
       - sh
@@ -36,8 +37,6 @@ services:
       - "${SALVIUM_APP_ROOT:?Set SALVIUM_APP_ROOT in .env}/ops:/mnt/ops"
 
   salviumd:
-    build:
-      context: ./docker/salviumd
     image: ${SALVIUMD_IMAGE:-salviumd:local}
     container_name: salviumd
     user: "${PUID:-1000}:${PGID:-1000}"
@@ -78,17 +77,20 @@ services:
       - --enforce-dns-checkpointing
       - --enable-dns-blocklist
       - --no-igd
-      - --prune-blockchain
-      - --sync-pruned-blocks
       - --add-exclusive-node=seed01.salvium.io
       - --add-exclusive-node=seed02.salvium.io
       - --add-exclusive-node=seed03.salvium.io
       - --add-exclusive-node=seed01.whiskymine.io
       - --add-exclusive-node=seed02.whiskymine.io
     ports:
-      - "${SALVIUM_P2P_PORT:-19080}:19080"
-      - "${SALVIUM_RPC_PORT:-19081}:19081"
-      - "${SALVIUM_RESTRICTED_RPC_PORT:-19089}:19089"
+      - "${PUBLIC_BIND_IP:-0.0.0.0}:${SALVIUM_P2P_PORT:-19080}:19080"
+      - "${LAN_BIND_IP:-127.0.0.1}:${SALVIUM_RESTRICTED_RPC_PORT:-19089}:19089"
+    expose:
+      - "19081"
+      - "19083"
+    networks:
+      - node
+      - privileged_rpc
     volumes:
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/salviumd:/home/salvium/.salvium"
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/salviumd-bin:/home/salvium/bin"
@@ -100,8 +102,6 @@ services:
       start_period: 1m
 
   p2pool:
-    build:
-      context: ./docker/p2pool
     image: ${P2POOL_IMAGE:-p2pool-salvium:local}
     container_name: salvium-p2pool
     user: "${PUID:-1000}:${PGID:-1000}"
@@ -145,9 +145,11 @@ services:
       - --stratum-api
       - --no-igd
     ports:
-      - "${P2POOL_STRATUM_PORT:-3333}:3333"
-      - "${P2POOL_PRIVATE_P2P_PORT:-38888}:38888"
-      - "${P2POOL_PUBLIC_P2P_PORT:-38889}:38889"
+      - "${LAN_BIND_IP:-127.0.0.1}:${P2POOL_STRATUM_PORT:-3333}:3333"
+      - "${PRIVATE_P2POOL_BIND_IP:-127.0.0.1}:${P2POOL_PRIVATE_P2P_PORT:-38888}:38888"
+      - "${PUBLIC_BIND_IP:-0.0.0.0}:${P2POOL_PUBLIC_P2P_PORT:-38889}:38889"
+    networks:
+      - node
     volumes:
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool:/home/p2pool/.p2pool"
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool-stats:/home/p2pool/stats"
@@ -175,7 +177,7 @@ services:
         apk add --no-cache curl jq >/dev/null 2>&1 || true
         echo "[updater] started; checking every $${CHECK_INTERVAL}s"
         while true; do
-          LATEST=$$(curl -sf --max-time 20 "$${RELEASES_API}" | jq -r '.tag_name // empty' 2>/dev/null || true)
+          LATEST=$$(curl -sf --proto '=https' --proto-redir '=https' --tlsv1.2 --max-time 20 "$${RELEASES_API}" | jq -r '.tag_name // empty' 2>/dev/null || true)
           CURRENT=$$(cat "$${VERSION_FILE}" 2>/dev/null || true)
           if [ -n "$${LATEST}" ] && [ -f "$${VERSION_FILE}" ] && [ "$${LATEST}" != "$${CURRENT}" ]; then
             echo "[updater] new version $${LATEST} (installed $${CURRENT:-none}) - restarting $${TARGET_CONTAINER}"
@@ -188,6 +190,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/salviumd-bin:/binmeta:ro"
+    networks:
+      - management
 
   p2pool-updater:
     image: ${DOCKER_CLI_IMAGE:-docker:cli}
@@ -209,7 +213,7 @@ services:
         apk add --no-cache curl jq >/dev/null 2>&1 || true
         echo "[p2pool-updater] started; checking every $${CHECK_INTERVAL}s"
         while true; do
-          LATEST=$$(curl -sf --max-time 20 "$${RELEASES_API}" | jq -r '.[0].tag_name // empty' 2>/dev/null || true)
+          LATEST=$$(curl -sf --proto '=https' --proto-redir '=https' --tlsv1.2 --max-time 20 "$${RELEASES_API}" | jq -r '.[0].tag_name // empty' 2>/dev/null || true)
           CURRENT=$$(cat "$${VERSION_FILE}" 2>/dev/null || true)
           if [ -n "$${LATEST}" ] && [ -f "$${VERSION_FILE}" ] && [ "$${LATEST}" != "$${CURRENT}" ]; then
             echo "[p2pool-updater] new version $${LATEST} (installed $${CURRENT:-none}) - restarting $${TARGET_CONTAINER}"
@@ -222,6 +226,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool:/binmeta:ro"
+    networks:
+      - management
 
   p2pool-watchdog:
     image: ${DOCKER_CLI_IMAGE:-docker:cli}
@@ -245,6 +251,8 @@ services:
       HEIGHT_STALL: "${WATCHDOG_HEIGHT_STALL:-600}"
       STALE_STATS: "${WATCHDOG_STALE_STATS:-300}"
       PROBE_MIN_OK: "${WATCHDOG_PROBE_MIN_OK:-2}"
+      PRIVATE_PROBE_MIN_OK: "${WATCHDOG_PRIVATE_PROBE_MIN_OK:-1}"
+      PRIVATE_PEERS_FILE: /private-peers/p2pool_peers.txt
       STOP_TIMEOUT: "60"
       TARGET_CONTAINER: salvium-p2pool
     volumes:
@@ -252,11 +260,12 @@ services:
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool-control:/control"
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool-stats:/stats:ro"
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool/public:/peers-live:ro"
+      - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool/private:/private-peers:ro"
       - "${SALVIUM_APP_ROOT:?Set SALVIUM_APP_ROOT in .env}/ops:/ops:ro"
+    networks:
+      - management
 
   stats:
-    build:
-      context: ./docker/stats
     image: ${STATS_IMAGE:-salvium-stats:local}
     container_name: salvium-stats
     restart: unless-stopped
@@ -267,17 +276,10 @@ services:
       p2pool:
         condition: service_started
     command:
-      - /bin/sh
-      - -c
-      - >-
-        cd /tmp/p2pool-repo;
-        git pull;
-        cp -r /tmp/p2pool-repo/docker-compose/statistics/app/* /app/;
-        echo 'Starting P2Pool Statistics App...';
-        python /app/p2pool_statistics.py || echo 'App crashed! Staying alive for troubleshooting...';
-        tail -f /dev/null
+      - python
+      - /app/p2pool_statistics.py
     ports:
-      - "${STATS_PORT:-3000}:80"
+      - "${LAN_BIND_IP:-127.0.0.1}:${STATS_PORT:-3000}:80"
     volumes:
       - "${SALVIUM_DATA_ROOT:?Set SALVIUM_DATA_ROOT in .env}/p2pool-stats:/data:ro"
     healthcheck:
@@ -286,3 +288,62 @@ services:
       timeout: 5s
       retries: 10
       start_period: 1m
+    networks:
+      - stats
+
+  firewall:
+    image: ${FIREWALL_IMAGE:-salvium-firewall:local}
+    container_name: salvium-firewall
+    user: "0:0"
+    restart: unless-stopped
+    network_mode: host
+    read_only: true
+    tmpfs:
+      - /run
+      - /tmp
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
+    environment:
+      LAN_BIND_IP: "${LAN_BIND_IP:-192.168.1.54}"
+      TRUSTED_LAN_CIDRS: "${TRUSTED_LAN_CIDRS:-192.168.1.0/24}"
+      RESTRICTED_RPC_EXTRA_CIDRS: "${RESTRICTED_RPC_EXTRA_CIDRS:-}"
+      PRIVATE_P2POOL_CIDRS: "${PRIVATE_P2POOL_CIDRS:-192.168.1.0/24}"
+      SALVIUM_RESTRICTED_RPC_PORT: "${SALVIUM_RESTRICTED_RPC_PORT:-19089}"
+      P2POOL_STRATUM_PORT: "${P2POOL_STRATUM_PORT:-3333}"
+      P2POOL_PRIVATE_P2P_PORT: "${P2POOL_PRIVATE_P2P_PORT:-38888}"
+      STATS_PORT: "${STATS_PORT:-3000}"
+      CHECK_INTERVAL: "60"
+    healthcheck:
+      test: ["CMD", "/usr/local/sbin/salvium-firewall", "check"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  node:
+    name: ${SALVIUM_NODE_NETWORK:-salvium_node}
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${SALVIUM_NODE_SUBNET:-172.30.190.0/28}
+  privileged_rpc:
+    name: ${SALVIUM_PRIVILEGED_RPC_NETWORK:-salvium_privileged_rpc}
+    external: true
+  stats:
+    name: ${SALVIUM_STATS_NETWORK:-salvium_stats}
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${SALVIUM_STATS_SUBNET:-172.30.190.32/28}
+  management:
+    name: ${SALVIUM_MANAGEMENT_NETWORK:-salvium_management}
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${SALVIUM_MANAGEMENT_SUBNET:-172.30.190.48/28}

@@ -7,6 +7,13 @@ designed to keep mining with as little manual intervention as possible.
 You do not need to be a Docker expert. The setup section explains what to
 change, what to leave alone, and which commands to copy and paste.
 
+Detailed operator references:
+
+- [`docs/ports-and-networks.md`](docs/ports-and-networks.md) explains every
+  port, DHCP-aware access rule, Docker network, and firewall boundary.
+- [`docs/automatic-downloads.md`](docs/automatic-downloads.md) explains and
+  tests release checksum verification and binary rollback.
+
 ## What is special about this stack?
 
 ### Automatic Salvium and P2Pool updates
@@ -63,6 +70,12 @@ stack, run:
 ```bash
 ./ops/salvium-mode auto
 ```
+
+Private fallback also requires at least one reachable private P2Pool peer.
+Test private mode before enabling `auto`; confirm that port `38888` opens and
+miners reconnect to `3333`. The watchdog checks the retained private peer list
+before an automatic fallback and holds the current public instance if no
+private peer is reachable.
 
 ### Safe switching and restart-resistant state
 
@@ -158,12 +171,16 @@ Open it in a simple editor:
 nano .env
 ```
 
-At minimum, change these three values:
+At minimum, change these network and storage values:
 
 ```dotenv
 SALVIUM_APP_ROOT=/full/path/to/salvium-node-p2pool
 SALVIUM_DATA_ROOT=/full/path/to/salvium-data
 P2POOL_WALLET=YOUR_PUBLIC_SALVIUM_WALLET_ADDRESS
+LAN_BIND_IP=YOUR_DOCKER_SERVER_LAN_IP
+PRIVATE_P2POOL_BIND_IP=YOUR_DOCKER_SERVER_LAN_IP
+TRUSTED_LAN_CIDRS=YOUR_TRUSTED_LAN_SUBNET
+PRIVATE_P2POOL_CIDRS=YOUR_TRUSTED_LAN_SUBNET
 ```
 
 What they mean:
@@ -174,6 +191,11 @@ What they mean:
   binaries will be stored. Keep it outside the Git repository.
 - `P2POOL_WALLET` is the public address that receives mining payouts. Never
   enter a wallet seed phrase, private key, or wallet password here.
+- `LAN_BIND_IP` is the Docker server's reserved or static LAN address.
+- `TRUSTED_LAN_CIDRS` is the trusted DHCP network as a group, such as
+  `192.168.1.0/24`; individual wallet and miner addresses may change.
+- The private P2Pool values normally match the LAN values unless private peers
+  arrive through a separate VPN subnet.
 
 In `nano`, press **Ctrl+O**, **Enter**, then **Ctrl+X** to save and exit.
 
@@ -200,25 +222,37 @@ pinned to public mode.
 
 ### Step 4: Check the configuration
 
-This command checks the Compose file without starting anything:
+Create or validate the no-Internet network used by authorized server-side
+wallet services, then check the Compose policy:
 
 ```bash
+./scripts/create-privileged-network.sh .env
 docker compose --env-file .env config --quiet
+./scripts/validate-hardening.sh .env
 ```
 
-No output means the check passed. If it prints an error, correct that error
-before continuing.
+The Compose check is quiet when it passes; the hardening check prints a short
+`PASS` line for each policy. Correct any reported error before continuing.
 
 ### Step 5: Build and start the stack
 
 Run:
 
 ```bash
-docker compose --env-file .env up -d --build
+./scripts/build-images.sh
+docker compose --env-file .env up -d
 ```
 
-The first start can take several minutes because Docker builds the local images
-and the containers download current Salvium and P2Pool binaries.
+The first command builds the four local images from the reviewed files in this
+repository. The second command starts them. The first start can take several
+minutes because the containers download current Salvium and P2Pool binaries.
+
+After the images have built, you can exercise the real release download and
+checksum path without installing anything:
+
+```bash
+./scripts/verify-release-downloads.sh
+```
 
 Check the services:
 
@@ -326,7 +360,8 @@ To update the Compose files and scripts:
 
 ```bash
 git pull
-docker compose --env-file .env up -d --build
+./scripts/build-images.sh
+docker compose --env-file .env up -d
 ```
 
 Read new release notes before applying repository changes to a production node.
@@ -476,13 +511,14 @@ docker compose --env-file .env logs --tail=100 salviumd
   change those containers or their scripts can control Docker on the host.
 - P2Pool currently receives `SYS_ADMIN` and `IPC_LOCK` for the production
   hugepage/memory configuration.
-- The default ports are published on the Docker host. Use firewall rules and
-  do not expose RPC, statistics, or Stratum services directly to the internet
-  unless you understand the consequences.
+- Unrestricted daemon RPC is never published on the Docker host. Restricted
+  RPC, Stratum, statistics, and private P2Pool traffic are bound to the LAN
+  address and filtered by trusted source subnet. See
+  `docs/ports-and-networks.md`.
 - Binary downloads are SHA-256 verified, but checksums come from the same
   upstream release channel rather than an independent digital signature.
-  Some container-image and source references are not yet pinned. See
-  `docs/security.md`.
+  Some container-image references are not yet pinned by digest. The statistics
+  source is pinned to a reviewed commit. See `docs/security.md`.
 
 ## What is intentionally not included?
 

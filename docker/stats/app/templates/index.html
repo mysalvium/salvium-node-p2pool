@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{url_for('static', filename='bootstrap.min.css')}}">
+    <title>Salvium P2Pool Statistics</title>
+
+    <style>
+      :root {
+        --salvium-teal: #009688;
+        --salvium-glow: rgba(0, 150, 136, 0.4);
+        --bg-deep: #050505;
+        --card-bg: #111111;
+        --border-color: #222222;
+        --text-main: #ffffff;
+        --text-muted: #94a3b8;
+      }
+
+      body {
+        background-color: var(--bg-deep);
+        color: var(--text-main);
+        font-family: 'Outfit', sans-serif;
+        font-size: 0.85rem;
+        padding-top: 2rem;
+        padding-bottom: 3rem;
+      }
+
+      h1, h2 {
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        color: var(--salvium-teal);
+        margin: 0;
+      }
+
+      .stats-header {
+        text-align: center;
+        margin-bottom: 3rem;
+      }
+      .salvium-logo {
+        filter: drop-shadow(0 0 10px var(--salvium-glow));
+        margin-bottom: 1rem;
+      }
+
+      .card {
+        background-color: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        margin-bottom: 1.5rem;
+        height: 100%;
+      }
+
+      .card:hover {
+        border-color: var(--salvium-teal);
+        box-shadow: 0 0 20px var(--salvium-glow);
+      }
+
+      .card-header {
+        background-color: transparent !important;
+        border-bottom: 1px solid var(--border-color);
+        padding: 1.25rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+      }
+
+      .table {
+        color: var(--text-main);
+        margin-bottom: 0;
+      }
+      .table td {
+        border-top: 1px solid var(--border-color);
+        padding: 0.75rem 1.25rem;
+        vertical-align: middle;
+      }
+      .table tr:first-child td { border-top: none; }
+
+      .label-muted {
+        color: var(--text-muted);
+        font-weight: 400;
+      }
+
+      .value-bright {
+        font-weight: 600;
+        text-align: right;
+      }
+
+      .highlight-teal {
+        color: var(--salvium-teal);
+        font-weight: 700;
+      }
+
+      .worker-row:hover { background-color: rgba(0, 150, 136, 0.05); }
+
+      .table-responsive { border-radius: 0 0 16px 16px; }
+
+      /* Custom Scrollbar */
+      ::-webkit-scrollbar { width: 8px; }
+      ::-webkit-scrollbar-track { background: var(--bg-deep); }
+      ::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+      ::-webkit-scrollbar-thumb:hover { background: var(--salvium-teal); }
+    </style>
+  </head>
+
+  <body>
+    <div class="container-fluid px-4">
+      <div class="stats-header">
+        <img src="{{url_for('static', filename='salvium_white.webp')}}" width="80" height="80" class="salvium-logo" alt="Salvium"/>
+        <h1>P2Pool Node <span style="color:white">Statistics</span></h1>
+        <p class="label-muted">
+          Birth: {{ my_bday }} ago
+          &nbsp;|&nbsp; P2Pool: {{ p2pool_version }}
+          &nbsp;|&nbsp; UI: {{ ui_version }}
+          {% if xmrig_ok and xmrig_summary %}
+            &nbsp;|&nbsp; <a href="{{ url_for('render_xmrig') }}" style="color: var(--salvium-teal); text-decoration: none;">XMRig: {{ xmrig_summary.get('version', 'unknown') }}</a>
+          {% elif xmrig_url %}
+            &nbsp;|&nbsp; XMRig: <span class="label-muted">unavailable</span>
+          {% endif %}
+        </p>
+      </div>
+
+      <div class="row">
+        <div class="col-lg-4 mb-4">
+          <div class="card">
+            <div class="card-header text-center"><h2>Local Pool</h2></div>
+            <div class="card-body p-0">
+              <table class="table">
+                <tbody>
+                  <tr><td class="label-muted">Current Hashrate (Raw)</td><td class="value-bright highlight-teal">{{ current_hashrate|humanize }}H/s</td></tr>
+                  <tr><td class="label-muted">Current Hashrate Source</td><td class="value-bright">{{ current_hashrate_source|upper }}</td></tr>
+                  <tr><td class="label-muted">P2Pool Est. Hashrate (Sum)</td><td class="value-bright">{{ p2pool_est_hashrate|humanize }}H/s</td></tr>
+                  <tr><td class="label-muted">Hashrate 15m (Pool)</td><td class="value-bright">{{ local_stats["hashrate_15m"]|humanize }}H/s</td></tr>
+                  <tr><td class="label-muted">Hashrate 1h</td><td class="value-bright">{{ local_stats["hashrate_1h"]|humanize }}H/s</td></tr>
+                  <tr><td class="label-muted">Hashrate 24h</td><td class="value-bright">{{ local_stats["hashrate_24h"]|humanize }}H/s</td></tr>
+                  <tr><td class="label-muted">Est. Daily Yield</td><td class="value-bright highlight-teal">{{ daily_yield }} SAL</td></tr>
+                  <tr><td class="label-muted">Shares Found</td><td class="value-bright">{{ local_stats["shares_found"] }}</td></tr>
+                  <tr><td class="label-muted">Shares Failed</td><td class="value-bright text-danger">{{ local_stats["shares_failed"] }}</td></tr>
+                  <tr><td class="label-muted">Current Effort</td><td class="value-bright">{{ local_stats["current_effort"] }}%</td></tr>
+                  <tr><td class="label-muted">Average Effort</td><td class="value-bright">{{ local_stats["average_effort"] }}%</td></tr>
+                  <tr><td class="label-muted">Block Reward Share</td><td class="value-bright highlight-teal">{{ local_stats["block_reward_share_percent"] }}%</td></tr>
+                  <tr><td class="label-muted">Total Hashes</td><td class="value-bright">{{ local_stats["total_hashes"]|humanize }}</td></tr>
+                  <tr><td class="label-muted">Miner Connections</td><td class="value-bright">{{ local_stats["incoming_connections"] }}</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-lg-4 mb-4">
+          <div class="card">
+            <div class="card-header text-center"><h2>Global Pool</h2></div>
+            <div class="card-body p-0">
+              <table class="table">
+                <tbody>
+                  <tr><td class="label-muted">Pool Hashrate</td><td class="value-bright">{{ pool_stats["pool_statistics"]["hashRate"] | humanize }}H/s</td></tr>
+                  <tr><td class="label-muted">Round Hashes</td><td class="value-bright">{{ stats_mod["pool"]["roundHashes"]|humanize }}</td></tr>
+                  <tr><td class="label-muted">Total Hashes Found</td><td class="value-bright">{{ pool_stats["pool_statistics"]["totalHashes"]|humanize }}</td></tr>
+                  <tr><td class="label-muted">Blocks Found</td><td class="value-bright">{{ pool_stats["pool_statistics"]["totalBlocksFound"] }}</td></tr>
+                  <tr><td class="label-muted">Active Miners</td><td class="value-bright">{{ pool_stats["pool_statistics"]["miners"] }}</td></tr>
+                  <tr><td class="label-muted">Last Block Found</td><td class="value-bright">{{ pool_stats["pool_statistics"]["lastBlockFoundTime"]|timeago }} ago</td></tr>
+                  <tr><td class="label-muted">Last Block ID</td><td class="value-bright" style="font-size: 0.7rem; color: var(--text-muted);">{{ pool_stats["pool_statistics"]["lastBlockFound"] }}</td></tr>
+                  <tr><td class="label-muted">Payout Method</td><td class="value-bright">PPLNS (2160 blocks)</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-lg-4 mb-4">
+          <div class="card">
+            <div class="card-header text-center"><h2>Salvium Network</h2></div>
+            <div class="card-body p-0">
+              <table class="table">
+                <tbody>
+                  <tr><td class="label-muted">Net Hashrate</td><td class="value-bright">{{ net_hashrate|humanize }}H/s</td></tr>
+                  <tr><td class="label-muted">Height</td><td class="value-bright">{{ network_stats["height"] }}</td></tr>
+                  <tr><td class="label-muted">Difficulty</td><td class="value-bright">{{ network_stats["difficulty"]|humanize }}</td></tr>
+                  <tr><td class="label-muted">Block Reward</td><td class="value-bright highlight-teal">{{ (network_stats["reward"] / 100000000) | round(4) }} SAL</td></tr>
+                  <tr><td class="label-muted">Last Main Block</td><td class="value-bright">{{ network_stats["timestamp"]|timeago }} ago</td></tr>
+                  <tr><td class="label-muted">Head Hash</td><td class="value-bright" style="font-size: 0.65rem; color: var(--text-muted); word-break: break-all;">{{ network_stats["hash"] }}</td></tr>
+                  <tr><td class="label-muted">P2P Port</td><td class="value-bright">38888</td></tr>
+                  <tr><td class="label-muted">Stratum Port</td><td class="value-bright">3333</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {% if xmrig_ok and xmrig_summary %}
+      <div class="row mt-2">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-header"><h2>XMRig Summary</h2></div>
+            <div class="card-body p-0">
+              <div class="table-responsive">
+                <table class="table">
+                  <tbody>
+                    <tr><td class="label-muted">Worker ID</td><td class="value-bright">{{ xmrig_summary.get('worker_id', 'unknown') }}</td></tr>
+                    <tr><td class="label-muted">Algorithm</td><td class="value-bright">{{ xmrig_summary.get('algo', 'unknown') }}</td></tr>
+                    <tr><td class="label-muted">Hashrate 10s / 1m / 15m</td>
+                      <td class="value-bright">
+                        {{ (xmrig_summary.get('hashrate', {}).get('total', [None, None, None])[0])|default('—')|humanize }}H/s /
+                        {{ (xmrig_summary.get('hashrate', {}).get('total', [None, None, None])[1])|default('—')|humanize }}H/s /
+                        {{ (xmrig_summary.get('hashrate', {}).get('total', [None, None, None])[2])|default('—')|humanize }}H/s
+                      </td>
+                    </tr>
+                    <tr><td class="label-muted">Highest</td><td class="value-bright">{{ xmrig_summary.get('hashrate', {}).get('highest')|default('—')|humanize }}H/s</td></tr>
+                    <tr><td class="label-muted">Huge Pages</td><td class="value-bright">{{ xmrig_summary.get('hugepages', 'unknown') }}</td></tr>
+                    <tr><td class="label-muted">CPU</td><td class="value-bright">{{ xmrig_summary.get('cpu', {}).get('brand', 'unknown') }}</td></tr>
+                    <tr><td class="label-muted">Shares (good/total)</td>
+                      <td class="value-bright">
+                        {{ xmrig_summary.get('results', {}).get('shares_good', xmrig_summary.get('results', {}).get('accepted', '—')) }} /
+                        {{ xmrig_summary.get('results', {}).get('shares_total', '—') }}
+                      </td>
+                    </tr>
+                    <tr><td class="label-muted">Pool</td><td class="value-bright">{{ xmrig_summary.get('connection', {}).get('pool', 'unknown') }}</td></tr>
+                    <tr><td class="label-muted">Uptime</td><td class="value-bright">{{ xmrig_summary.get('connection', {}).get('uptime', 0) | timespan }}</td></tr>
+                    <tr><td class="label-muted">Ping</td><td class="value-bright">{{ xmrig_summary.get('connection', {}).get('ping', '—') }} ms</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="row mt-2">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-header"><h2>Connected Miners</h2></div>
+            <div class="card-body p-0">
+              <div class="table-responsive">
+                <table class="table">
+                  <thead>
+                    <tr class="label-muted" style="border-bottom: 1px solid var(--border-color); background: rgba(255,255,255,0.02);">
+                      <th class="p-3">Worker Name</th>
+                      <th class="p-3">Address</th>
+                      <th class="p-3">Uptime</th>
+                      <th class="p-3 text-right">Difficulty</th>
+                      <th class="p-3 text-right">Est. Hashrate</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for w in workers %}
+                    <tr class="worker-row">
+                      <td class="p-3 highlight-teal" style="text-align: left;">
+                        <a href="{{ url_for('render_worker', worker_id=w.id) }}" style="color: var(--salvium-teal); text-decoration: none;">{{ w.name }}</a>
+                      </td>
+                      <td class="p-3 label-muted">{{ w.addr }}</td>
+                      <td class="p-3 label-muted">{{ w.uptime }}</td>
+                      <td class="p-3 text-right">{{ w.difficulty_h }}</td>
+                      <td class="p-3 text-right value-bright">{{ w.hashrate }}</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {% if xmrig_proxy_workers %}
+      <div class="row mt-2">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-header"><h2>XMRig-Proxy Workers (from /workers.json)</h2></div>
+            <div class="card-body p-0">
+              <div class="table-responsive">
+                <table class="table">
+                  <thead>
+                    <tr class="label-muted" style="border-bottom: 1px solid var(--border-color); background: rgba(255,255,255,0.02);">
+                      <th class="p-3">Worker</th>
+                      <th class="p-3">IP</th>
+                      <th class="p-3 text-right">Accepted</th>
+                      <th class="p-3 text-right">Rejected</th>
+                      <th class="p-3 text-right">Invalid</th>
+                      <th class="p-3 text-right">Hashrate (1m)</th>
+                      <th class="p-3 text-right">Hashrate (10m)</th>
+                      <th class="p-3 text-right">Hashrate (1h)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for row in xmrig_proxy_workers.get('workers', []) %}
+                      <tr class="worker-row">
+                        <td class="p-3 highlight-teal">{{ row[0] }}</td>
+                        <td class="p-3 label-muted">{{ row[1] }}</td>
+                        <td class="p-3 text-right">{{ row[3] }}</td>
+                        <td class="p-3 text-right">{{ row[4] }}</td>
+                        <td class="p-3 text-right">{{ row[5] }}</td>
+                        <td class="p-3 text-right value-bright">{{ row[8]|humanize }}H/s</td>
+                        <td class="p-3 text-right">{{ row[9]|humanize }}H/s</td>
+                        <td class="p-3 text-right">{{ row[10]|humanize }}H/s</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <script>
+      window.setInterval('refresh()', 30000); // 30s refresh for stability
+      function refresh() { window.location.reload(); }
+    </script>
+  </body>
+</html>

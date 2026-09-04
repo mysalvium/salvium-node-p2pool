@@ -8,6 +8,7 @@ RELEASES_API="https://gitlab.com/api/v4/projects/${PROJECT_ID}/releases"
 BINARY="/home/p2pool/.p2pool/bin/p2pool-salvium"
 VERSION_FILE="/home/p2pool/.p2pool/bin/.current_version"
 PREVIOUS_BINARY="${BINARY}.previous"
+VERIFY_RELEASE_ONLY="${VERIFY_RELEASE_ONLY:-0}"
 
 RELEASE_JSON=""
 LATEST_TAG=""
@@ -144,6 +145,13 @@ install_release() {
         return $?
     fi
 
+    if [ "$VERIFY_RELEASE_ONLY" = "1" ]; then
+        cleanup
+        TMPDIR=""
+        echo "==> Release ${LATEST_TAG} passed checksum, archive, and binary-content verification."
+        return 0
+    fi
+
     if ! atomic_install "$p2pool_bin"; then
         fallback_or_fail "Atomic installation failed."
         return $?
@@ -159,10 +167,18 @@ install_release() {
     return 0
 }
 
-mkdir -p "$(dirname "$BINARY")"
-
 echo "==> Checking for p2pool-salvium updates..."
 fetch_release
+
+if [ "$VERIFY_RELEASE_ONLY" = "1" ]; then
+    if [ -z "$LATEST_TAG" ] || ! install_release; then
+        echo "==> FATAL: Unable to verify the latest P2Pool release." >&2
+        exit 1
+    fi
+    exit 0
+fi
+
+mkdir -p "$(dirname "$BINARY")"
 
 LOCAL_VERSION=""
 if [ -f "$VERSION_FILE" ]; then

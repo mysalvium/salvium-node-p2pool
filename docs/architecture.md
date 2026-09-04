@@ -1,8 +1,17 @@
 # Architecture
 
-The stack uses Docker Compose's default bridge network. P2Pool connects to the
-daemon's restricted RPC port and ZMQ endpoint by service name. The statistics
-service reads P2Pool's generated API files through a read-only bind mount.
+The stack uses four purpose-specific Docker bridge networks. P2Pool and the
+daemon share `salvium_node`; P2Pool connects to restricted RPC and ZMQ by
+service name. The internal `salvium_privileged_rpc` network has no Internet
+gateway and carries unrestricted RPC only for explicitly attached server-side
+wallet services. Statistics and management services do not share either node
+network.
+
+The statistics service reads P2Pool's generated API files through a read-only
+bind mount. Published LAN services are protected by explicit host-address
+bindings and narrow Docker-forwarding/host-ingress policies managed by
+`salvium-firewall`. See
+[`ports-and-networks.md`](ports-and-networks.md).
 
 Persistent data lives below `SALVIUM_DATA_ROOT`. Operational scripts are read
 from `SALVIUM_APP_ROOT/ops`. No named Docker volumes are used.
@@ -10,8 +19,9 @@ from `SALVIUM_APP_ROOT/ops`. No named Docker volumes are used.
 The updater containers periodically compare local version marker files with
 the latest upstream release. A version change causes the target container to
 restart; its entrypoint then downloads the new binary into the persistent
-binary directory. The watchdog reads P2Pool statistics and control state and
-can restart P2Pool when switching between public and private modes.
+binary directory after checksum verification. The watchdog reads P2Pool
+statistics and control state and can restart P2Pool when switching between
+public and private modes. See [`automatic-downloads.md`](automatic-downloads.md).
 
 The Compose file retains the production resource limits and hardening:
 
@@ -19,4 +29,6 @@ The Compose file retains the production resource limits and hardening:
   `no-new-privileges`, and a two-minute stop grace period.
 - P2Pool: two CPUs, 4192 MiB, unlimited memlock, hugepages, `IPC_LOCK`, and
   `SYS_ADMIN`.
+- Firewall: read-only root, only `NET_ADMIN`, host networking, no Docker socket,
+  no host filesystem mount, and no listening service.
 - JSON-file logs rotate at three 10 MiB files per service.

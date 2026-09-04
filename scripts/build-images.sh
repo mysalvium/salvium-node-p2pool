@@ -15,6 +15,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="$REPO_DIR/docker"
+ENV_FILE="${ENV_FILE:-$REPO_DIR/.env}"
+if [ -f "$ENV_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  set +a
+fi
+SALVIUMD_IMAGE="${SALVIUMD_IMAGE:-salviumd:local}"
+P2POOL_IMAGE="${P2POOL_IMAGE:-p2pool-salvium:local}"
+STATS_IMAGE="${STATS_IMAGE:-salvium-stats:local}"
+FIREWALL_IMAGE="${FIREWALL_IMAGE:-salvium-firewall:local}"
+STATS_SOURCE_COMMIT="${STATS_SOURCE_COMMIT:-a0fed9e186fa85d16eefdaf62bd6dbecadb629af}"
 
 G='\033[0;32m'; Y='\033[1;33m'; NC='\033[0m'
 info()  { echo -e "${G}[BUILD]${NC} $*"; }
@@ -27,16 +39,20 @@ echo "============================================================"
 echo ""
 
 # ── salviumd ────────────────────────────────────────────────────────────────
-info "Building salviumd:local ..."
-docker build -t salviumd:local "$BUILD_DIR/salviumd"
+info "Building ${SALVIUMD_IMAGE} ..."
+docker build -t "$SALVIUMD_IMAGE" "$BUILD_DIR/salviumd"
 
 # ── p2pool-salvium ──────────────────────────────────────────────────────────
-info "Building p2pool-salvium:local ..."
-docker build -t p2pool-salvium:local "$BUILD_DIR/p2pool"
+info "Building ${P2POOL_IMAGE} ..."
+docker build -t "$P2POOL_IMAGE" "$BUILD_DIR/p2pool"
 
 # ── salvium-stats ───────────────────────────────────────────────────────────
-info "Building salvium-stats:local ..."
-docker build -t salvium-stats:local "$BUILD_DIR/stats"
+info "Building ${STATS_IMAGE} ..."
+docker build --build-arg "STATS_SOURCE_COMMIT=$STATS_SOURCE_COMMIT" -t "$STATS_IMAGE" "$BUILD_DIR/stats"
+
+# ── host ingress policy ─────────────────────────────────────────────────────
+info "Building ${FIREWALL_IMAGE} ..."
+docker build -t "$FIREWALL_IMAGE" "$BUILD_DIR/firewall"
 
 echo ""
 info "All images built:"

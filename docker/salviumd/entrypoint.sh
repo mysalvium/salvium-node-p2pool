@@ -7,6 +7,7 @@ RELEASES_API="https://api.github.com/repos/salvium/salvium/releases/latest"
 BINARY="/home/salvium/bin/salviumd"
 VERSION_FILE="/home/salvium/bin/.current_version"
 PREVIOUS_BINARY="${BINARY}.previous"
+VERIFY_RELEASE_ONLY="${VERIFY_RELEASE_ONLY:-0}"
 
 RELEASE_JSON=""
 LATEST_TAG=""
@@ -135,6 +136,13 @@ install_release() {
         return $?
     fi
 
+    if [ "$VERIFY_RELEASE_ONLY" = "1" ]; then
+        cleanup
+        TMPDIR=""
+        echo "==> Release ${LATEST_TAG} passed checksum, archive, and binary-content verification."
+        return 0
+    fi
+
     if ! atomic_install "$salviumd_bin"; then
         fallback_or_fail "Atomic installation failed."
         return $?
@@ -150,10 +158,18 @@ install_release() {
     return 0
 }
 
-mkdir -p "$(dirname "$BINARY")"
-
 echo "==> Checking for salviumd updates..."
 fetch_release
+
+if [ "$VERIFY_RELEASE_ONLY" = "1" ]; then
+    if [ -z "$LATEST_TAG" ] || ! install_release; then
+        echo "==> FATAL: Unable to verify the latest salviumd release." >&2
+        exit 1
+    fi
+    exit 0
+fi
+
+mkdir -p "$(dirname "$BINARY")"
 
 LOCAL_VERSION=""
 if [ -f "$VERSION_FILE" ]; then

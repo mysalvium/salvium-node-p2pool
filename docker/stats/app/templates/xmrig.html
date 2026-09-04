@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{url_for('static', filename='bootstrap.min.css')}}">
+    <title>XMRig Stats - Salvium P2Pool</title>
+
+    <style>
+      :root {
+        --salvium-teal: #009688;
+        --salvium-glow: rgba(0, 150, 136, 0.4);
+        --bg-deep: #050505;
+        --card-bg: #111111;
+        --border-color: #222222;
+        --text-main: #ffffff;
+        --text-muted: #94a3b8;
+      }
+
+      body {
+        background-color: var(--bg-deep);
+        color: var(--text-main);
+        font-family: 'Outfit', sans-serif;
+        font-size: 0.85rem;
+        padding-top: 2rem;
+        padding-bottom: 3rem;
+      }
+
+      h1, h2 {
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        color: var(--salvium-teal);
+        margin: 0;
+      }
+
+      .stats-header {
+        text-align: center;
+        margin-bottom: 2rem;
+      }
+      .salvium-logo {
+        filter: drop-shadow(0 0 10px var(--salvium-glow));
+        margin-bottom: 1rem;
+      }
+
+      .card {
+        background-color: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        margin-bottom: 1.5rem;
+      }
+
+      .card:hover {
+        border-color: var(--salvium-teal);
+        box-shadow: 0 0 20px var(--salvium-glow);
+      }
+
+      .card-header {
+        background-color: transparent !important;
+        border-bottom: 1px solid var(--border-color);
+        padding: 1.25rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+      }
+
+      .table {
+        color: var(--text-main);
+        margin-bottom: 0;
+      }
+      .table td, .table th {
+        border-top: 1px solid var(--border-color);
+        padding: 0.75rem 1.25rem;
+        vertical-align: middle;
+      }
+      .table tr:first-child td { border-top: none; }
+
+      .label-muted {
+        color: var(--text-muted);
+        font-weight: 400;
+      }
+
+      .value-bright {
+        font-weight: 600;
+        text-align: right;
+      }
+
+      .highlight-teal {
+        color: var(--salvium-teal);
+        font-weight: 700;
+      }
+
+      .backlink {
+        display: inline-block;
+        margin-top: 0.5rem;
+        color: var(--text-muted);
+        text-decoration: none;
+      }
+      .backlink:hover { color: var(--salvium-teal); }
+
+      .table-responsive { border-radius: 0 0 16px 16px; }
+
+      /* Custom Scrollbar */
+      ::-webkit-scrollbar { width: 8px; }
+      ::-webkit-scrollbar-track { background: var(--bg-deep); }
+      ::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+      ::-webkit-scrollbar-thumb:hover { background: var(--salvium-teal); }
+    </style>
+  </head>
+
+  <body>
+    <div class="container-fluid px-4">
+      <div class="stats-header">
+        <img src="{{url_for('static', filename='salvium_white.webp')}}" width="70" height="70" class="salvium-logo" alt="Salvium"/>
+        <h1>XMRig <span style="color:white">Statistics</span></h1>
+        <div class="label-muted">
+          UI: {{ ui_version }}
+        </div>
+        <a class="backlink" href="{{ url_for('render_index') }}">← Back to overview</a>
+      </div>
+
+      <div class="row">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-header"><h2>Summary</h2></div>
+            <div class="card-body p-0">
+              <table class="table">
+                <tbody>
+                  <tr><td class="label-muted">API Base URL</td><td class="value-bright">{{ xmrig_base_url if xmrig_base_url else 'not configured' }}</td></tr>
+                  <tr><td class="label-muted">Endpoint</td><td class="value-bright">{{ xmrig_endpoint if xmrig_endpoint else '—' }}</td></tr>
+                  <tr><td class="label-muted">Status</td>
+                    <td class="value-bright">
+                      {% if xmrig_ok %}
+                        <span class="highlight-teal">OK</span>
+                      {% else %}
+                        <span class="label-muted">unavailable</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                  {% if xmrig_ok and xmrig_summary %}
+                    <tr><td class="label-muted">Version</td><td class="value-bright">{{ xmrig_summary.get('version', 'unknown') }}</td></tr>
+                    <tr><td class="label-muted">Worker ID</td><td class="value-bright">{{ xmrig_summary.get('worker_id', 'unknown') }}</td></tr>
+                    <tr><td class="label-muted">Algorithm</td><td class="value-bright">{{ xmrig_summary.get('algo', 'unknown') }}</td></tr>
+                    <tr><td class="label-muted">Hashrate 10s / 1m / 15m</td>
+                      <td class="value-bright">
+                        {{ (xmrig_summary.get('hashrate', {}).get('total', [None, None, None])[0])|default('—')|humanize }}H/s /
+                        {{ (xmrig_summary.get('hashrate', {}).get('total', [None, None, None])[1])|default('—')|humanize }}H/s /
+                        {{ (xmrig_summary.get('hashrate', {}).get('total', [None, None, None])[2])|default('—')|humanize }}H/s
+                      </td>
+                    </tr>
+                    <tr><td class="label-muted">Highest</td><td class="value-bright">{{ xmrig_summary.get('hashrate', {}).get('highest')|default('—')|humanize }}H/s</td></tr>
+                    <tr><td class="label-muted">Huge Pages</td><td class="value-bright">{{ xmrig_summary.get('hugepages', 'unknown') }}</td></tr>
+                    <tr><td class="label-muted">CPU</td><td class="value-bright">{{ xmrig_summary.get('cpu', {}).get('brand', 'unknown') }}</td></tr>
+                    <tr><td class="label-muted">Shares (good/total)</td>
+                      <td class="value-bright">
+                        {{ xmrig_summary.get('results', {}).get('shares_good', xmrig_summary.get('results', {}).get('accepted', '—')) }} /
+                        {{ xmrig_summary.get('results', {}).get('shares_total', '—') }}
+                      </td>
+                    </tr>
+                    <tr><td class="label-muted">Pool</td><td class="value-bright">{{ xmrig_summary.get('connection', {}).get('pool', 'unknown') }}</td></tr>
+                    <tr><td class="label-muted">Pool Uptime</td><td class="value-bright">{{ xmrig_summary.get('connection', {}).get('uptime', 0) | timespan }}</td></tr>
+                    <tr><td class="label-muted">Ping</td><td class="value-bright">{{ xmrig_summary.get('connection', {}).get('ping', '—') }} ms</td></tr>
+                  {% else %}
+                    <tr><td class="label-muted" colspan="2">
+                      No XMRig stats available.
+                      <br/>
+                      <span class="label-muted" style="font-size: 0.8em;">
+                        Tip: enable XMRig HTTP API and set XMRIG_API_URL (+ token if used).
+                      </span>
+                    </td></tr>
+                  {% endif %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {% if xmrig_ok and xmrig_summary and xmrig_summary.get('hashrate', {}).get('threads') %}
+      <div class="row">
+        <div class="col-12">
+          <div class="card">
+            <div class="card-header"><h2>Thread Hashrates</h2></div>
+            <div class="card-body p-0">
+              <div class="table-responsive">
+                <table class="table">
+                  <thead>
+                    <tr class="label-muted" style="border-bottom: 1px solid var(--border-color); background: rgba(255,255,255,0.02);">
+                      <th class="p-3">Thread</th>
+                      <th class="p-3 text-right">10s</th>
+                      <th class="p-3 text-right">1m</th>
+                      <th class="p-3 text-right">15m</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for t in xmrig_summary.get('hashrate', {}).get('threads', []) %}
+                      <tr>
+                        <td class="p-3 label-muted">#{{ loop.index0 }}</td>
+                        <td class="p-3 text-right value-bright">{{ t[0]|default('—')|humanize }}H/s</td>
+                        <td class="p-3 text-right">{{ t[1]|default('—')|humanize }}H/s</td>
+                        <td class="p-3 text-right">{{ t[2]|default('—')|humanize }}H/s</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+    </div>
+
+    <script>
+      window.setInterval('refresh()', 30000);
+      function refresh() { window.location.reload(); }
+    </script>
+  </body>
+</html>
