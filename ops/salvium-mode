@@ -11,13 +11,24 @@
 # Pinning takes effect immediately (restarts p2pool). Switching to `auto` does
 # not restart anything -- the watchdog takes over from the current mode.
 #
-# Set SALVIUM_APP_ROOT when the repository is installed elsewhere.
+# Reads the repository's .env file when present. Environment variables can
+# still override its values for one-off administration.
 # =============================================================================
 set -euo pipefail
 
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+ENV_FILE="$SCRIPT_DIR/../.env"
+if [ -f "$ENV_FILE" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$ENV_FILE"
+    set +a
+fi
+
 BASE="${SALVIUM_APP_ROOT:-/mnt/sharedrive/apps/salvium}"
-CONTROL="$BASE/data/p2pool-control"
-STATS="$BASE/data/p2pool-stats"
+DATA_ROOT="${SALVIUM_DATA_ROOT:-$BASE/data}"
+CONTROL="$DATA_ROOT/p2pool-control"
+STATS="$DATA_ROOT/p2pool-stats"
 TARGET=salvium-p2pool
 
 die() { echo "error: $*" >&2; exit 1; }
