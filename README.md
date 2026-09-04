@@ -307,6 +307,53 @@ YOUR-SERVER-IP:3333
 The payout wallet is already configured in `.env`. Public/private switching
 does not change this Stratum address.
 
+### Step 9: Check the firewall and router
+
+The stack starts a `salvium-firewall` container that protects the services
+intended only for your home network. You do not need to create matching
+firewall rules by hand. Confirm that the managed rules are active:
+
+```bash
+docker exec salvium-firewall /usr/local/sbin/salvium-firewall check
+```
+
+The command should report that both firewall chains are installed. If it
+reports an error, do not expose any stack ports through your router until the
+problem is corrected.
+
+If this server is behind a normal home router, reserve its LAN address so it
+does not change. For the original installation, reserve `192.168.1.54`.
+
+Only these optional public peer ports should be forwarded from the Internet:
+
+| Router rule | Protocol | Forward to | Purpose |
+| --- | --- | --- | --- |
+| `19080` | TCP | `YOUR-SERVER-IP:19080` | Incoming Salvium node peers |
+| `38889` | TCP | `YOUR-SERVER-IP:38889` | Incoming public P2Pool peers |
+
+Use separate TCP rules if your router requires one rule per port. Do not use
+`BOTH`; UDP is not required. These forwards help other public peers connect to
+you, but the stack can still make outbound connections without them.
+
+Never forward these private ports to the public Internet:
+
+| Port | Used for | Who should reach it |
+| --- | --- | --- |
+| `19081` | Unrestricted, elevated daemon RPC | Internal Docker wallet services only |
+| `19089` | Restricted wallet RPC | Trusted LAN or VPN clients |
+| `3333` | Miner Stratum and its HTTP statistics API | Trusted LAN miners only |
+| `38888` | Private/custom P2Pool peers | Approved private peers or a VPN only |
+| `3000` | Statistics website | Trusted LAN browsers only |
+
+Wallets and miners may use DHCP. They do not need fixed individual addresses
+when `TRUSTED_LAN_CIDRS` covers the trusted LAN subnet, for example
+`192.168.1.0/24`. Guest and IoT devices should be placed on a different guest
+network or VLAN rather than included in that trusted subnet.
+
+For a full explanation of the Docker firewall chains, every port, VPN access,
+and container-network isolation, read
+[`docs/ports-and-networks.md`](docs/ports-and-networks.md).
+
 ## Everyday commands
 
 Run these commands from the repository directory.
