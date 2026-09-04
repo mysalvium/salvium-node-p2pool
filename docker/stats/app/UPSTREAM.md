@@ -3,7 +3,7 @@
 This directory is the reviewed statistics application that was running in the
 production stack on 2026-09-03.
 
-- Upstream: `https://github.com/trevorwilf/p2pool-salvium`
+- Upstream: `https://github.com/mysalvium/p2pool-salvium`
 - Upstream branch at capture: `updatestatistics`
 - Source commit: `a0fed9e186fa85d16eefdaf62bd6dbecadb629af`
 

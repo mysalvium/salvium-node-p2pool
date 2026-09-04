@@ -11,5 +11,5 @@ COPY app/ /app/
 
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-LABEL org.opencontainers.image.source="https://github.com/trevorwilf/p2pool-salvium" \
+LABEL org.opencontainers.image.source="https://github.com/mysalvium/p2pool-salvium" \
       org.opencontainers.image.revision="${STATS_SOURCE_COMMIT}"
