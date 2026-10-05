@@ -119,8 +119,9 @@ http://YOUR-SERVER-IP:3000
 - A root-owned host controller accepts only fixed restart requests for
   `salviumd` and `salvium-p2pool`; it cannot run caller-provided commands.
 - Container bases, the statistics source, Python packages, the scanner, and
-  GitHub Actions are pinned. Weekly automation scans for secrets,
-  vulnerabilities, and configuration mistakes and produces an SBOM per image.
+  GitHub Actions are pinned. On every push and pull request, automation scans
+  for secrets, vulnerabilities, and configuration mistakes and produces an
+  SBOM per image.
 - TrueNAS can run an automated five-minute health check, a weekly ZFS backup,
   and a weekly checksum/decompression/selected-file restore test.
 - Wallets, blockchain data, logs, credentials, and local configuration are

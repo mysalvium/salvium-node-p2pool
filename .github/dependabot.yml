@@ -8,17 +8,17 @@ updates:
       - /docker/firewall
       - /docker/management
     schedule:
-      interval: weekly
+      interval: monthly
     open-pull-requests-limit: 5
 
   - package-ecosystem: pip
     directory: /docker/stats/app
     schedule:
-      interval: weekly
+      interval: monthly
     open-pull-requests-limit: 5
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     open-pull-requests-limit: 5

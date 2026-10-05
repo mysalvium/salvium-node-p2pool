@@ -43,10 +43,10 @@ Do not use a directory writable by an untrusted user for that cache.
 
 `.github/workflows/security.yml` runs shell and Compose checks, builds the
 pinned images, scans them, and retains the reports/SBOMs as a workflow artifact
-for 30 days. It runs for pull requests, pushes to `main`, every Monday, and
-manual dispatches.
+for 30 days. It runs for pull requests, pushes to `main`, and manual
+dispatches; nothing is scheduled.
 
-Dependabot opens weekly proposals for Docker, Python, and GitHub Action
+Dependabot opens monthly proposals for Docker, Python, and GitHub Action
 updates. A proposal is not permission to deploy it. Review the upstream release
 and new digest, build, run the full scan, test the stack, and only then merge.
 

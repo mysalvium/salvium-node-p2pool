@@ -30,7 +30,7 @@ Implemented supply-chain protections:
   checks repository secrets, Compose/Dockerfile configuration, dependencies,
   and all five images; it fails on fixable critical image vulnerabilities and
   emits SPDX JSON SBOMs.
-- GitHub runs the checks on pushes, pull requests, weekly, and on demand.
+- GitHub runs the checks on pushes, pull requests, and on demand.
   Third-party Actions are pinned to full commit SHAs. Dependabot proposes
   reviewed updates for Docker bases, Python dependencies, and Actions.
 
